@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from homeassistant.const import CURRENCY_EURO, UnitOfEnergy, UnitOfVolume
 
-DOMAIN = "coolblue"
+DOMAIN = "coolblue_energy"
 DEFAULT_NAME = "Coolblue Energy"
 
 PLATFORMS = ["sensor"]

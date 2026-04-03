@@ -4,7 +4,7 @@
   "render_readme": true,
   "homeassistant": "2026.2.3",
   "zip_release": true,
-  "filename": "coolblue.zip",
+  "filename": "coolblue_energy.zip",
   "hide_default_branch": false,
   "content_in_root": false
 }

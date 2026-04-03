@@ -14,7 +14,7 @@ import pytest
 from custom_components.coolblue_energy.coordinator import CoordinatorData
 from custom_components.coolblue_energy.sensor import _SENSORS, CoolblueSensor
 
-from .conftest import make_day_elec, make_day_gas, make_elec_entry, make_gas_entry
+from .conftest import make_day_elec, make_day_gas, make_elec_entry
 
 
 def _make_sensor(key: str, electricity=None, gas=None) -> CoolblueSensor:

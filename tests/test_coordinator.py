@@ -348,7 +348,6 @@ class TestAsyncBackfill:
         following day re-seeds from the DB (3 extra _get_sum_before calls).
         """
         get_sum_calls = []
-        original_get_sum = coordinator._get_sum_before
 
         async def spy_get_sum(stat_id, dt):
             get_sum_calls.append(stat_id)
