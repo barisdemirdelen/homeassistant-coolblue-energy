@@ -1,0 +1,20 @@
+{
+  "domain": "coolblue",
+  "name": "Coolblue Energy",
+  "codeowners": [
+    "@barisdemirdelen"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "recorder"
+  ],
+  "documentation": "https://github.com/barisdemirdelen/homeassistant-coolblue-energy",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/barisdemirdelen/homeassistant-coolblue-energy/issues",
+  "requirements": [
+    "aiohttp>=3.0.0,<4.0.0",
+    "beautifulsoup4>=4.0.0,<5.0.0",
+    "pydantic>=2.0.0,<3.0.0"
+  ],
+  "version": "0.1.0"
+}
