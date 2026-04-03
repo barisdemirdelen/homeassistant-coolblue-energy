@@ -35,14 +35,13 @@ class CoolblueSensorDescription(SensorEntityDescription):
 # ── Sensor catalogue ──────────────────────────────────────────────────────────
 
 _SENSORS: tuple[CoolblueSensorDescription, ...] = (
-    # ── Energy / gas (informational — state_class=MEASUREMENT so the recorder
-    #    does not try to auto-create statistics that would conflict with our
-    #    external statistics injected by the coordinator) ─────────────────────
+    # ── Energy / gas (informational — no state_class so the recorder does not
+    #    create statistics that would conflict with the external statistics
+    #    injected by the coordinator) ──────────────────────────────────────────
     CoolblueSensorDescription(
         key="electricity_consumed",
         translation_key="electricity_consumed",
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=3,
         value_fn=lambda d: (
@@ -53,7 +52,6 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
         key="electricity_returned",
         translation_key="electricity_returned",
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=3,
         value_fn=lambda d: (
@@ -64,7 +62,6 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
         key="gas_consumed",
         translation_key="gas_consumed",
         device_class=SensorDeviceClass.GAS,
-        state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
         suggested_display_precision=3,
         value_fn=lambda d: sum(e.gas for e in d.gas) if d.gas else None,
@@ -145,6 +142,11 @@ class CoolblueSensor(CoordinatorEntity[CoolblueCoordinator], SensorEntity):
             name=DEFAULT_NAME,
             manufacturer="Coolblue",
         )
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Use the description key as entity object ID, independent of display name."""
+        return self.entity_description.key
 
     @property
     def native_value(self) -> float | None:

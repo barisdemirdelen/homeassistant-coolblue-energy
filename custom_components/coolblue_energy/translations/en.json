@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Coolblue Energy",
-        "description": "Enter your Coolblue account credentials.",
+        "description": "Enter your Coolblue account credentials. Initial import might take a while.",
         "data": {
           "email": "Email address",
           "password": "Password"
@@ -28,13 +28,24 @@
   },
   "entity": {
     "sensor": {
-      "electricity_consumed": { "name": "Yesterday's electricity" },
-      "electricity_returned": { "name": "Yesterday's solar return" },
-      "gas_consumed":         { "name": "Yesterday's gas" },
-      "spot_price":           { "name": "Current spot price" },
-      "daily_electricity_cost": { "name": "Yesterday's electricity cost" },
-      "daily_gas_cost":       { "name": "Yesterday's gas cost" }
+      "electricity_consumed": {
+        "name": "Electricity consumed"
+      },
+      "electricity_returned": {
+        "name": "Electricity returned to the grid"
+      },
+      "gas_consumed": {
+        "name": "Gas consumed"
+      },
+      "spot_price": {
+        "name": "Current spot price"
+      },
+      "daily_electricity_cost": {
+        "name": "Electricity cost"
+      },
+      "daily_gas_cost": {
+        "name": "Gas cost"
+      }
     }
   }
 }
-

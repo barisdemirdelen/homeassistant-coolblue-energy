@@ -17,6 +17,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from .util import CoercedFloat
+
 
 class CamelCaseModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -69,17 +71,17 @@ class GetMeterReadingsRequest(CamelCaseModel):
 class PeakUsage(CamelCaseModel):
     """kWh split across tariff bands (electricity / solar production)."""
 
-    total: float
-    off_peak: float
-    peak: float
+    total: CoercedFloat
+    off_peak: CoercedFloat
+    peak: CoercedFloat
 
 
 class CostComponent(CamelCaseModel):
     """EUR cost split into fixed, consumption and total for one commodity."""
 
-    total: float
-    fixed: float
-    consumption: float
+    total: CoercedFloat
+    fixed: CoercedFloat
+    consumption: CoercedFloat
 
 
 class HourlyCosts(CamelCaseModel):
@@ -87,7 +89,7 @@ class HourlyCosts(CamelCaseModel):
 
     electricity: CostComponent
     gas: CostComponent
-    production: float
+    production: CoercedFloat
     """Saleback credit (negative cost, i.e. earnings from feed-in)."""
 
 

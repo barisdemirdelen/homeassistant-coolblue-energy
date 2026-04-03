@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import (
     StatisticData,
     StatisticMeanType,
@@ -205,7 +206,7 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         Falls back to ``0.0`` if no prior statistics exist.
         """
         query_start = before_dt - timedelta(hours=25)
-        result = await self.hass.async_add_executor_job(
+        result = await get_instance(self.hass).async_add_executor_job(
             lambda: statistics_during_period(
                 self.hass,
                 query_start,
