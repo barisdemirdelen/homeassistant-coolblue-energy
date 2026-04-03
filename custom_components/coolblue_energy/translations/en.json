@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Coolblue Energy",
+        "description": "Enter your Coolblue account credentials.",
+        "data": {
+          "email": "Email address",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Coolblue Energy",
+        "description": "Your session has expired. Please re-enter your password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Could not connect to Coolblue Energy. Please try again."
+    },
+    "abort": {
+      "already_configured": "This Coolblue account is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "electricity_consumed": { "name": "Yesterday's electricity" },
+      "electricity_returned": { "name": "Yesterday's solar return" },
+      "gas_consumed":         { "name": "Yesterday's gas" },
+      "spot_price":           { "name": "Current spot price" },
+      "daily_electricity_cost": { "name": "Yesterday's electricity cost" },
+      "daily_gas_cost":       { "name": "Yesterday's gas cost" }
+    }
+  }
+}
+
