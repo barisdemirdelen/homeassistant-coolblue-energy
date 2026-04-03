@@ -116,7 +116,25 @@ def mock_hass() -> MagicMock:
         return fn(*args) if args else fn()
 
     hass.async_add_executor_job = executor_job
+
+    # get_instance(hass) must return a recorder-like object with the same
+    # executor so coordinator._get_sum_before works in tests.
+    mock_recorder = MagicMock()
+    mock_recorder.async_add_executor_job = executor_job
+    hass._mock_recorder = mock_recorder  # keep a reference for patching
+
     return hass
+
+
+@pytest.fixture(autouse=True)
+def patch_get_instance(mock_hass):
+    """Patch coordinator.get_instance to return mock_hass._mock_recorder."""
+    from unittest.mock import patch
+    with patch(
+        "custom_components.coolblue_energy.coordinator.get_instance",
+        return_value=mock_hass._mock_recorder,
+    ):
+        yield
 
 
 @pytest.fixture
