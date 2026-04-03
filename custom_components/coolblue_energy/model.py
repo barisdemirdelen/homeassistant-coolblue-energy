@@ -15,14 +15,11 @@ from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-# ── Shared config ─────────────────────────────────────────────────────────────
+from pydantic.alias_generators import to_camel
 
 
 class CamelCaseModel(BaseModel):
-    """Base model that accepts both camelCase aliases and snake_case field names."""
-
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(alias_generator=to_camel)
 
 
 # ── Request ───────────────────────────────────────────────────────────────────
@@ -73,7 +70,7 @@ class PeakUsage(CamelCaseModel):
     """kWh split across tariff bands (electricity / solar production)."""
 
     total: float
-    off_peak: float = Field(alias="offPeak")
+    off_peak: float
     peak: float
 
 
@@ -99,8 +96,8 @@ class SmartDeviceUsage(CamelCaseModel):
 
     free: float
     paid: float
-    has_free_drying: bool = Field(alias="hasFreeDrying")
-    has_free_washing: bool = Field(alias="hasFreeWashing")
+    has_free_drying: bool
+    has_free_washing: bool
 
 
 # ── Top-level response entry ──────────────────────────────────────────────────
@@ -131,7 +128,7 @@ class MeterReadingEntry(CamelCaseModel):
 
     costs: HourlyCosts
 
-    smart_device_usage: SmartDeviceUsage = Field(alias="smartDeviceUsage")
+    smart_device_usage: SmartDeviceUsage
 
     price: float
     """Spot price in EUR/kWh for this hour."""
