@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 from typing import Callable
 
 from homeassistant.components.sensor import (
@@ -18,6 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DEFAULT_NAME, DOMAIN, EUR_KWH
 from .coordinator import CoolblueCoordinator, CoordinatorData
@@ -70,7 +72,6 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
     CoolblueSensorDescription(
         key="spot_price",
         translation_key="spot_price",
-        state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=EUR_KWH,
         suggested_display_precision=4,
         # Last non-zero price in the day's entries (most recent settled hour).
@@ -83,7 +84,7 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
     CoolblueSensorDescription(
         key="daily_electricity_cost",
         translation_key="daily_electricity_cost",
-        state_class=SensorStateClass.MEASUREMENT,
+        state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=2,
         value_fn=lambda d: (
@@ -95,7 +96,7 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
     CoolblueSensorDescription(
         key="daily_gas_cost",
         translation_key="daily_gas_cost",
-        state_class=SensorStateClass.MEASUREMENT,
+        state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=2,
         value_fn=lambda d: sum(e.costs.gas.total for e in d.gas) if d.gas else None,
@@ -142,6 +143,14 @@ class CoolblueSensor(CoordinatorEntity[CoolblueCoordinator], SensorEntity):
             name=DEFAULT_NAME,
             manufacturer="Coolblue",
         )
+
+    @property
+    def last_reset(self) -> datetime | None:
+        """Return midnight of yesterday for TOTAL sensors (start of the reported period)."""
+        if self.entity_description.state_class == SensorStateClass.TOTAL:
+            yesterday = date.today() - timedelta(days=1)
+            return dt_util.as_local(datetime.combine(yesterday, time.min))
+        return None
 
     @property
     def suggested_object_id(self) -> str:
