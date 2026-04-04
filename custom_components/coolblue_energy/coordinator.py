@@ -23,7 +23,7 @@ from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     statistics_during_period,
 )
-from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.const import CURRENCY_EURO, UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -34,8 +34,10 @@ from .const import (
     RETRY_DAYS,
     SCAN_INTERVAL,
     STAT_ELECTRICITY_CONSUMED,
+    STAT_ELECTRICITY_COST,
     STAT_ELECTRICITY_RETURNED,
     STAT_GAS_CONSUMED,
+    STAT_GAS_COST,
 )
 from .model import GetMeterReadingsRequest, MeterReadingEntry
 
@@ -49,10 +51,12 @@ _ALL_STAT_IDS = (
     STAT_ELECTRICITY_CONSUMED,
     STAT_ELECTRICITY_RETURNED,
     STAT_GAS_CONSUMED,
+    STAT_ELECTRICITY_COST,
+    STAT_GAS_COST,
 )
 
 # Maps statistic_id → (friendly name, unit of measurement, unit class)
-_STAT_META: dict[str, tuple[str, str, str]] = {
+_STAT_META: dict[str, tuple[str, str, str | None]] = {
     STAT_ELECTRICITY_CONSUMED: (
         "Coolblue Electricity Consumed",
         UnitOfEnergy.KILO_WATT_HOUR,
@@ -64,6 +68,8 @@ _STAT_META: dict[str, tuple[str, str, str]] = {
         "energy",
     ),
     STAT_GAS_CONSUMED: ("Coolblue Gas Consumed", UnitOfVolume.CUBIC_METERS, "volume"),
+    STAT_ELECTRICITY_COST: ("Coolblue Electricity Cost", CURRENCY_EURO, None),
+    STAT_GAS_COST: ("Coolblue Gas Cost", CURRENCY_EURO, None),
 }
 
 
@@ -372,6 +378,12 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 lambda e: e.production.total,
             ),
             (STAT_GAS_CONSUMED, gas_entries, lambda e: e.gas),
+            (
+                STAT_ELECTRICITY_COST,
+                electricity_entries,
+                lambda e: e.costs.electricity.total,
+            ),
+            (STAT_GAS_COST, gas_entries, lambda e: e.costs.gas.total),
         ]
 
         result_sums: dict[str, float] = {}

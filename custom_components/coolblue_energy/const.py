@@ -25,6 +25,8 @@ ATTR_START_DATE = "start_date"
 STAT_ELECTRICITY_CONSUMED = f"{DOMAIN}:electricity_consumed"
 STAT_ELECTRICITY_RETURNED = f"{DOMAIN}:electricity_returned"
 STAT_GAS_CONSUMED = f"{DOMAIN}:gas_consumed"
+STAT_ELECTRICITY_COST = f"{DOMAIN}:electricity_cost"
+STAT_GAS_COST = f"{DOMAIN}:gas_cost"
 
 EUR_KWH = f"{CURRENCY_EURO}/{UnitOfEnergy.KILO_WATT_HOUR}"
 EUR_M3 = f"{CURRENCY_EURO}/{UnitOfVolume.CUBIC_METERS}"
