@@ -40,6 +40,9 @@
       "daily_electricity_cost": {
         "name": "Electricity cost (Yesterday)"
       },
+      "daily_electricity_returned_compensation": {
+        "name": "Electricity returned compensation (Yesterday)"
+      },
       "daily_gas_cost": {
         "name": "Gas cost (Yesterday)"
       }

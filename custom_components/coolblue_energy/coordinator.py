@@ -36,6 +36,7 @@ from .const import (
     STAT_ELECTRICITY_CONSUMED,
     STAT_ELECTRICITY_COST,
     STAT_ELECTRICITY_RETURNED,
+    STAT_ELECTRICITY_RETURNED_COMPENSATION,
     STAT_GAS_CONSUMED,
     STAT_GAS_COST,
 )
@@ -52,6 +53,7 @@ _ALL_STAT_IDS = (
     STAT_ELECTRICITY_RETURNED,
     STAT_GAS_CONSUMED,
     STAT_ELECTRICITY_COST,
+    STAT_ELECTRICITY_RETURNED_COMPENSATION,
     STAT_GAS_COST,
 )
 
@@ -69,6 +71,11 @@ _STAT_META: dict[str, tuple[str, str, str | None]] = {
     ),
     STAT_GAS_CONSUMED: ("Coolblue Gas Consumed", UnitOfVolume.CUBIC_METERS, "volume"),
     STAT_ELECTRICITY_COST: ("Coolblue Electricity Cost", CURRENCY_EURO, None),
+    STAT_ELECTRICITY_RETURNED_COMPENSATION: (
+        "Coolblue Electricity Returned Compensation",
+        CURRENCY_EURO,
+        None,
+    ),
     STAT_GAS_COST: ("Coolblue Gas Cost", CURRENCY_EURO, None),
 }
 
@@ -386,7 +393,12 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
             (
                 STAT_ELECTRICITY_COST,
                 costs_entries if electricity_entries else [],
-                lambda e: e.costs.electricity.total + e.costs.production,
+                lambda e: e.costs.electricity.total,
+            ),
+            (
+                STAT_ELECTRICITY_RETURNED_COMPENSATION,
+                costs_entries if electricity_entries else [],
+                lambda e: -e.costs.production,
             ),
             (
                 STAT_GAS_COST,

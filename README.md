@@ -17,15 +17,16 @@ needing a P1 dongle.
 
 ## Features
 
-| What                            | Detail                                          |
-|---------------------------------|-------------------------------------------------|
-| ⚡ Electricity consumed          | Hourly kWh, injected into Energy Dashboard      |
-| ☀️ Electricity returned (solar) | Hourly kWh, injected into Energy Dashboard      |
-| 🔥 Gas consumed                 | Hourly m³, injected into Energy Dashboard       |
-| 💶 Daily electricity cost       | Total electricity cost for yesterday (€)        |
-| 💶 Daily gas cost               | Total gas cost for yesterday (€)                |
-| 📅 7-day back-fill              | History injected automatically on first install |
-| 🔄 Refresh interval             | Every 6 hours                                   |
+| What                              | Detail                                          |
+|-----------------------------------|-------------------------------------------------|
+| ⚡ Electricity consumed            | Hourly kWh, injected into Energy Dashboard      |
+| ☀️ Electricity returned (solar)   | Hourly kWh, injected into Energy Dashboard      |
+| 🔥 Gas consumed                   | Hourly m³, injected into Energy Dashboard       |
+| 💶 Daily electricity cost         | Electricity consumption cost for yesterday (€)  |
+| 💶 Daily electricity compensation | Feed-in credit earned for returned solar (€)    |
+| 💶 Daily gas cost                 | Total gas cost for yesterday (€)                |
+| 📅 7-day back-fill                | History injected automatically on first install |
+| 🔄 Refresh interval               | Every 6 hours                                   |
 
 ---
 
@@ -76,13 +77,14 @@ new password.
 After the first successful data fetch, navigate to **Settings → Dashboards → Energy**
 and add the statistics injected by this integration:
 
-| Statistic ID                           | Use for                |
-|----------------------------------------|------------------------|
-| `coolblue_energy:electricity_consumed` | Grid consumption       |
-| `coolblue_energy:electricity_returned` | Return to grid (solar) |
-| `coolblue_energy:gas_consumed`         | Gas consumption        |
-| `coolblue_energy:electricity_cost`     | Electricity cost (€)   |
-| `coolblue_energy:gas_cost`             | Gas cost (€)           |
+| Statistic ID                                        | Use for                          |
+|-----------------------------------------------------|----------------------------------|
+| `coolblue_energy:electricity_consumed`              | Grid consumption                 |
+| `coolblue_energy:electricity_returned`              | Return to grid (solar)           |
+| `coolblue_energy:gas_consumed`                      | Gas consumption                  |
+| `coolblue_energy:electricity_cost`                  | Electricity consumption cost (€) |
+| `coolblue_energy:electricity_returned_compensation` | Solar feed-in credit (€)         |
+| `coolblue_energy:gas_cost`                          | Gas cost (€)                     |
 
 The integration injects cumulative hourly sums — the Energy Dashboard will display
 them as daily and monthly totals.
@@ -94,14 +96,17 @@ them as daily and monthly totals.
 1. Under **Electricity grid**, click **Add consumption** and select
    `coolblue_energy:electricity_consumed` (labelled *Coolblue Electricity Consumed*).
 2. Click **Add return** and select `coolblue_energy:electricity_returned`
-   (labelled *Coolblue Electricity Returned*).
-3. For **Cost**, choose **Use an entity tracking the total costs** and select
-   `coolblue_energy:electricity_cost`.
+   (labeled *Coolblue Electricity Returned*).
+3. For **Cost tracking**, choose **Use an entity tracking the total costs** and select
+   `coolblue_energy:electricity_cost` (consumption cost only).
+4. For **Export compensation**, choose **Use an entity tracking the total compensation** and select
+   `coolblue_energy:electricity_returned_compensation` (feed-in credit earned for solar
+   returned to the grid). Only relevant if you have solar panels.
 
 #### Gas
 
 1. Under **Gas consumption**, click **Add gas source** and select
-   `coolblue_energy:gas_consumed` (labelled *Coolblue Gas Consumed*).
+   `coolblue_energy:gas_consumed` (labeled *Coolblue Gas Consumed*).
 2. For **Cost**, choose **Use an entity tracking the total costs** and select
    `coolblue_energy:gas_cost`.
 
@@ -140,13 +145,14 @@ data:
 
 Six sensor entities are created under the **Coolblue Energy** device:
 
-| Entity                          | Unit | Description                               |
-|---------------------------------|------|-------------------------------------------|
-| `sensor.electricity_consumed`   | kWh  | Total electricity consumed yesterday      |
-| `sensor.electricity_returned`   | kWh  | Total solar production returned yesterday |
-| `sensor.gas_consumed`           | m³   | Total gas consumed yesterday              |
-| `sensor.daily_electricity_cost` | €    | Total electricity cost yesterday          |
-| `sensor.daily_gas_cost`         | €    | Total gas cost yesterday                  |
+| Entity                                           | Unit | Description                                        |
+|--------------------------------------------------|------|----------------------------------------------------|
+| `sensor.electricity_consumed`                    | kWh  | Total electricity consumed yesterday               |
+| `sensor.electricity_returned`                    | kWh  | Total solar production returned yesterday          |
+| `sensor.gas_consumed`                            | m³   | Total gas consumed yesterday                       |
+| `sensor.daily_electricity_cost`                  | €    | Electricity consumption cost yesterday             |
+| `sensor.daily_electricity_returned_compensation` | €    | Feed-in credit earned for solar returned yesterday |
+| `sensor.daily_gas_cost`                          | €    | Total gas cost yesterday                           |
 
 ---
 

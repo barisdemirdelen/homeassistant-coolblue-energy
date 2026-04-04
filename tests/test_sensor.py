@@ -51,8 +51,37 @@ class TestNativeValue:
         assert _make_sensor("gas_consumed").native_value == pytest.approx(1.2)
 
     def test_daily_electricity_cost(self):
-        """24 cost entries × €0.25 = €6.00 (from costs request, includes fixed fee)."""
+        """24 cost entries × €0.25 = €6.00 (electricity consumption cost only, excludes production credit)."""
         assert _make_sensor("daily_electricity_cost").native_value == pytest.approx(6.0)
+
+    def test_daily_electricity_cost_excludes_production_credit(self):
+        """Electricity cost sensor must not include the production (feed-in) credit."""
+        costs = make_day_costs(electricity_cost=0.30, production=-0.08)
+        # Only electricity.total (0.30) counts; production credit must not reduce this
+        assert _make_sensor("daily_electricity_cost", costs=costs).native_value == pytest.approx(
+            24 * 0.30
+        )
+
+    def test_daily_electricity_returned_compensation(self):
+        """24 cost entries × €0.05 feed-in credit = €1.20 compensation."""
+        costs = make_day_costs(electricity_cost=0.25, production=-0.05)
+        assert _make_sensor(
+            "daily_electricity_returned_compensation", costs=costs
+        ).native_value == pytest.approx(1.20)
+
+    def test_daily_electricity_returned_compensation_zero_when_no_production(self):
+        """Without production the compensation must be 0.0 (not None)."""
+        costs = make_day_costs(electricity_cost=0.25, production=0.0)
+        assert _make_sensor(
+            "daily_electricity_returned_compensation", costs=costs
+        ).native_value == pytest.approx(0.0)
+
+    def test_daily_electricity_returned_compensation_empty_costs(self):
+        """Empty costs list must return None, not 0.0."""
+        assert (
+            _make_sensor("daily_electricity_returned_compensation", costs=[]).native_value
+            is None
+        )
 
     def test_daily_gas_cost(self):
         """24 cost entries × €0.10 = €2.40 (from costs request, includes fixed fee)."""

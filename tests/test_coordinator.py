@@ -24,6 +24,7 @@ from custom_components.coolblue_energy.const import (
     STAT_ELECTRICITY_CONSUMED,
     STAT_ELECTRICITY_COST,
     STAT_ELECTRICITY_RETURNED,
+    STAT_ELECTRICITY_RETURNED_COMPENSATION,
     STAT_GAS_CONSUMED,
     STAT_GAS_COST,
 )
@@ -45,6 +46,7 @@ _ALL_STATS = (
     STAT_ELECTRICITY_RETURNED,
     STAT_GAS_CONSUMED,
     STAT_ELECTRICITY_COST,
+    STAT_ELECTRICITY_RETURNED_COMPENSATION,
     STAT_GAS_COST,
 )
 _EMPTY_SEED = {s: 0.0 for s in _ALL_STATS}
@@ -186,6 +188,7 @@ class TestInjectStatistics:
             STAT_ELECTRICITY_RETURNED: 200.0,
             STAT_GAS_CONSUMED: 50.0,
             STAT_ELECTRICITY_COST: 100.0,
+            STAT_ELECTRICITY_RETURNED_COMPENSATION: 10.0,
             STAT_GAS_COST: 20.0,
         }
         with patch(_ADD_PATH):
@@ -196,7 +199,8 @@ class TestInjectStatistics:
         assert result[STAT_ELECTRICITY_CONSUMED] == pytest.approx(1024.0)  # +24×1.0
         assert result[STAT_ELECTRICITY_RETURNED] == pytest.approx(204.8)  # +24×0.2
         assert result[STAT_GAS_CONSUMED] == pytest.approx(51.2)  # +24×0.05
-        assert result[STAT_ELECTRICITY_COST] == pytest.approx(106.0)  # +24×(0.25+0.0)
+        assert result[STAT_ELECTRICITY_COST] == pytest.approx(106.0)  # +24×0.25
+        assert result[STAT_ELECTRICITY_RETURNED_COMPENSATION] == pytest.approx(10.0)  # +24×0.0 (production=0.0)
         assert result[STAT_GAS_COST] == pytest.approx(22.4)  # +24×0.10
 
     async def test_queries_db_when_seed_is_none(
@@ -321,6 +325,44 @@ class TestInjectStatistics:
 
         assert captured["first_state"] == pytest.approx(0.05)
 
+    async def test_electricity_cost_excludes_production(self, coordinator, fake_electricity, fake_gas):
+        """STAT_ELECTRICITY_COST must only track electricity.total, not production credit."""
+        from .conftest import make_day_costs
+        costs = make_day_costs(electricity_cost=0.30, production=-0.08)
+        captured = {}
+
+        def capture(hass, metadata, stat_data):
+            if metadata["statistic_id"] == STAT_ELECTRICITY_COST:
+                captured["first_state"] = stat_data[0]["state"]
+
+        with patch(_ADD_PATH, side_effect=capture):
+            await coordinator._inject_statistics(
+                fake_electricity, fake_gas, costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+            )
+
+        # Must be 0.30 only, NOT 0.30 + (-0.08) = 0.22
+        assert captured["first_state"] == pytest.approx(0.30)
+
+    async def test_electricity_returned_compensation_stat(self, coordinator, fake_electricity, fake_gas):
+        """STAT_ELECTRICITY_RETURNED_COMPENSATION must track -production per entry."""
+        from .conftest import make_day_costs
+        costs = make_day_costs(electricity_cost=0.25, production=-0.05)
+        captured = {}
+
+        def capture(hass, metadata, stat_data):
+            if metadata["statistic_id"] == STAT_ELECTRICITY_RETURNED_COMPENSATION:
+                captured["states"] = [e["state"] for e in stat_data]
+                captured["end_sum"] = stat_data[-1]["sum"]
+
+        with patch(_ADD_PATH, side_effect=capture):
+            await coordinator._inject_statistics(
+                fake_electricity, fake_gas, costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+            )
+
+        # -(-0.05) = +0.05 per hour; 24 h × 0.05 = 1.20
+        assert all(pytest.approx(0.05) == s for s in captured["states"])
+        assert captured["end_sum"] == pytest.approx(1.20)
+
 
 # ── _async_backfill ───────────────────────────────────────────────────────────
 
@@ -358,7 +400,7 @@ class TestAsyncBackfill:
             await coordinator._async_backfill(3)
 
         # 3 initial seeds, no more (seeds chained for days 2 and 3)
-        assert len(get_sum_calls) == 5
+        assert len(get_sum_calls) == 6
 
     async def test_failed_day_causes_db_requery_for_next(self, coordinator):
         """
@@ -386,8 +428,8 @@ class TestAsyncBackfill:
         with patch(_ADD_PATH):
             await coordinator._async_backfill(7)
 
-        # 5 initial + 5 after the failure = at least 10
-        assert len(get_sum_calls) >= 10
+        # 6 initial + 6 after the failure = at least 12
+        assert len(get_sum_calls) >= 12
 
     async def test_failed_day_does_not_abort_remaining_days(
         self, coordinator, fake_electricity, fake_gas
@@ -558,10 +600,10 @@ class TestAsyncRetryRecentDays:
         with patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
-        # day-3 has no prior seed → 5 DB queries
+        # day-3 has no prior seed → 6 DB queries
         # day-2 is empty → seed reset
-        # day-1 has no seed (reset) → 5 more DB queries
-        assert len(get_sum_calls) == 10
+        # day-1 has no seed (reset) → 6 more DB queries
+        assert len(get_sum_calls) == 12
 
     async def test_returns_most_recent_day_with_data_when_yesterday_empty(
         self, coordinator, fake_electricity, fake_gas
@@ -677,7 +719,7 @@ class TestAsyncRetryRecentDays:
         with patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
-        assert len(get_sum_calls) == 5  # one per stat, only for the first day
+        assert len(get_sum_calls) == 6  # one per stat, only for the first day
 
     async def test_failed_day_resets_seed_for_next_day(self, coordinator):
         """
@@ -704,8 +746,8 @@ class TestAsyncRetryRecentDays:
         with patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
-        # day-3: seed=None → 5 queries; day-2 fails → reset; day-1: seed=None → 5 queries
-        assert len(get_sum_calls) == 10
+        # day-3: seed=None → 6 queries; day-2 fails → reset; day-1: seed=None → 6 queries
+        assert len(get_sum_calls) == 12
 
 
 # ── async_reimport_statistics ─────────────────────────────────────────────────
@@ -725,7 +767,6 @@ class TestAsyncReimportStatistics:
     async def test_fetches_correct_number_of_days(self, coordinator):
         """get_hourly_energy is called 3× for each day in the requested range."""
         start = date.today() - timedelta(days=5)
-        coordinator.async_refresh = AsyncMock()
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
@@ -736,7 +777,6 @@ class TestAsyncReimportStatistics:
     async def test_fetches_single_day_when_start_is_yesterday(self, coordinator):
         """Passing yesterday as start_date must result in exactly one day fetched."""
         start = date.today() - timedelta(days=1)
-        coordinator.async_refresh = AsyncMock()
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
@@ -767,33 +807,30 @@ class TestAsyncReimportStatistics:
         mock_add.assert_not_called()
         coordinator.async_refresh.assert_not_called()
 
-    async def test_calls_async_refresh_after_completion(self, coordinator):
-        """async_refresh must be called once after all days are processed."""
+    async def test_calls_async_set_updated_data_after_completion(self, coordinator):
+        """async_set_updated_data must be called once after all days are processed."""
         start = date.today() - timedelta(days=3)
-        coordinator.async_refresh = AsyncMock()
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
 
-        coordinator.async_refresh.assert_called_once()
+        coordinator.async_set_updated_data.assert_called_once()
 
     # ── data handling ─────────────────────────────────────────────────────────
 
     async def test_injects_statistics_for_all_days(self, coordinator):
-        """async_add_external_statistics must be called 3× per successful day."""
+        """async_add_external_statistics must be called once per stat per successful day."""
         start = date.today() - timedelta(days=3)
-        coordinator.async_refresh = AsyncMock()
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH) as mock_add:
             await coordinator.async_reimport_statistics(start)
 
-        # 3 days × 5 stats each
-        assert mock_add.call_count == 3 * 5
+        # 3 days × 6 stats each
+        assert mock_add.call_count == 3 * 6
 
     async def test_seeds_from_db_before_start_date(self, coordinator):
         """The seed sums must be queried from the DB at start_date, not time zero."""
         start = date.today() - timedelta(days=3)
-        coordinator.async_refresh = AsyncMock()
         queried_dts = []
 
         async def spy_get_sum(stat_id, dt):
@@ -809,9 +846,8 @@ class TestAsyncReimportStatistics:
         assert all(dt == expected_dt for dt in queried_dts)
 
     async def test_seeds_chained_across_days(self, coordinator):
-        """DB is only queried 3 times (seed for the first day); rest are chained."""
+        """DB is only queried 6 times (seed for the first day); rest are chained."""
         start = date.today() - timedelta(days=4)
-        coordinator.async_refresh = AsyncMock()
         get_sum_calls = []
 
         async def spy_get_sum(stat_id, dt):
@@ -823,14 +859,13 @@ class TestAsyncReimportStatistics:
         with patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
 
-        assert len(get_sum_calls) == 5
+        assert len(get_sum_calls) == 6
 
     # ── resilience ────────────────────────────────────────────────────────────
 
     async def test_skips_empty_day_and_continues(self, coordinator):
         """A day with no data must be skipped; remaining days must still be processed."""
         start = date.today() - timedelta(days=3)
-        coordinator.async_refresh = AsyncMock()
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
@@ -843,13 +878,12 @@ class TestAsyncReimportStatistics:
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH) as mock_add:
             await coordinator.async_reimport_statistics(start)
 
-        # 3 days total, 1 empty → 2 injected days × 5 stats
-        assert mock_add.call_count == 2 * 5
+        # 3 days total, 1 empty → 2 injected days × 6 stats
+        assert mock_add.call_count == 2 * 6
 
     async def test_failed_day_does_not_abort_remaining_days(self, coordinator):
         """An exception on one day must not stop the remaining days."""
         start = date.today() - timedelta(days=3)
-        coordinator.async_refresh = AsyncMock()
         fetch_count = [0]
         original_fetch = coordinator._fetch_day
 
@@ -866,16 +900,15 @@ class TestAsyncReimportStatistics:
 
         assert fetch_count[0] == 3
 
-    async def test_async_refresh_called_even_after_partial_failure(self, coordinator):
-        """async_refresh must always be called at the end, even after failures."""
+    async def test_async_set_updated_data_called_even_after_partial_failure(self, coordinator):
+        """async_set_updated_data must always be called at the end, even after failures."""
         start = date.today() - timedelta(days=2)
-        coordinator.async_refresh = AsyncMock()
         coordinator._client.get_hourly_energy.side_effect = RuntimeError("down")
 
         with patch(_STATS_PATH, return_value={}):
             await coordinator.async_reimport_statistics(start)
 
-        coordinator.async_refresh.assert_called_once()
+        coordinator.async_set_updated_data.assert_called_once()
 
 
 # ── _fetch_day — partial contract support ─────────────────────────────────────
@@ -1011,6 +1044,7 @@ class TestPartialContracts:
         assert STAT_ELECTRICITY_CONSUMED in injected_ids
         assert STAT_ELECTRICITY_RETURNED in injected_ids
         assert STAT_ELECTRICITY_COST in injected_ids
+        assert STAT_ELECTRICITY_RETURNED_COMPENSATION in injected_ids
 
     async def test_electricity_only_does_not_inject_gas_stats(
         self, coordinator, fake_electricity
@@ -1093,6 +1127,7 @@ class TestPartialContracts:
         assert STAT_ELECTRICITY_CONSUMED not in injected_ids
         assert STAT_ELECTRICITY_RETURNED not in injected_ids
         assert STAT_ELECTRICITY_COST not in injected_ids
+        assert STAT_ELECTRICITY_RETURNED_COMPENSATION not in injected_ids
 
     async def test_gas_only_returns_correct_coordinator_data(
         self, coordinator, fake_gas

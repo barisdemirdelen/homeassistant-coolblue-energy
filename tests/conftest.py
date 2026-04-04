@@ -69,6 +69,7 @@ def make_cost_entry(
     hour: int,
     electricity_cost: float = 0.25,
     gas_cost: float = 0.10,
+    production: float = 0.0,
 ) -> MeterReadingEntry:
     """Create one hourly costs-type MeterReadingEntry (from the 'costs' API request).
 
@@ -90,7 +91,7 @@ def make_cost_entry(
                 fixed=0.04,
                 consumption=round(gas_cost - 0.04, 6),
             ),
-            production=0.0,
+            production=production,
         ),
         smart_device_usage=SmartDeviceUsage(
             free=0.0, paid=0.0, has_free_drying=False, has_free_washing=False
@@ -116,11 +117,13 @@ def make_day_gas(n_hours: int = 24, gas: float = 0.05) -> list[MeterReadingEntry
 
 
 def make_day_costs(
-    n_hours: int = 24, electricity_cost: float = 0.25, gas_cost: float = 0.10
+    n_hours: int = 24, electricity_cost: float = 0.25, gas_cost: float = 0.10,
+    production: float = 0.0,
 ) -> list[MeterReadingEntry]:
     """Return *n_hours* uniform cost entries (from the 'costs' API request)."""
     return [
-        make_cost_entry(h, electricity_cost=electricity_cost, gas_cost=gas_cost)
+        make_cost_entry(h, electricity_cost=electricity_cost, gas_cost=gas_cost,
+                        production=production)
         for h in range(n_hours)
     ]
 
@@ -204,6 +207,7 @@ def coordinator(mock_hass, mock_api_client):
     bypassed via ``object.__new__``.
     """
     from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
+    from unittest.mock import MagicMock
 
     coord = object.__new__(CoolblueCoordinator)
     coord.hass = mock_hass
@@ -211,4 +215,6 @@ def coordinator(mock_hass, mock_api_client):
     coord._debtor_id = "00844083"
     coord._location_id = "3addb383-a979-40b4-8487-0f3bc0854da5"
     coord._backfilled = False
+    # HA DataUpdateCoordinator methods not available without full __init__
+    coord.async_set_updated_data = MagicMock()
     return coord
