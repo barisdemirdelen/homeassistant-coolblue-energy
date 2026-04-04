@@ -22,7 +22,6 @@ needing a P1 dongle.
 | ⚡ Electricity consumed          | Hourly kWh, injected into Energy Dashboard      |
 | ☀️ Electricity returned (solar) | Hourly kWh, injected into Energy Dashboard      |
 | 🔥 Gas consumed                 | Hourly m³, injected into Energy Dashboard       |
-| 💰 Spot price                   | Last settled hourly electricity price (€/kWh)   |
 | 💶 Daily electricity cost       | Total electricity cost for yesterday (€)        |
 | 💶 Daily gas cost               | Total gas cost for yesterday (€)                |
 | 📅 7-day back-fill              | History injected automatically on first install |
@@ -86,9 +85,52 @@ and add the statistics injected by this integration:
 The integration injects cumulative hourly sums — the Energy Dashboard will display
 them as daily and monthly totals.
 
+### Step-by-step setup
+
+#### Electricity grid
+
+1. Under **Electricity grid**, click **Add consumption** and select
+   `coolblue:electricity_consumed` (labelled *Coolblue Electricity Consumed*).
+2. Click **Add return** and select `coolblue:electricity_returned`
+   (labelled *Coolblue Electricity Returned*).
+3. For **Cost**, choose **Use an entity tracking the total costs** and select
+   `sensor.daily_electricity_cost`.
+
+#### Gas
+
+1. Under **Gas consumption**, click **Add gas source** and select
+   `coolblue:gas_consumed` (labelled *Coolblue Gas Consumed*).
+2. For **Cost**, choose **Use an entity tracking the total costs** and select
+   `sensor.daily_gas_cost`.
+
 > **Note:** Data is available from the day _after_ your contract start date.
 > The Coolblue portal only publishes data for **yesterday**, so today's usage
 > will appear tomorrow.
+
+---
+
+## Services
+
+### `coolblue_energy.reimport_statistics`
+
+Re-fetches and re-injects all hourly statistics from a given date through yesterday.
+Use this to fix gaps, negative spikes, or other artefacts in the Energy Dashboard
+(e.g. after a prolonged HA downtime or an API outage).
+
+| Field        | Type   | Required | Description                                      |
+|--------------|--------|----------|--------------------------------------------------|
+| `start_date` | `date` | ✅       | First day to reimport (format: `YYYY-MM-DD`)     |
+
+**Example — reimport the last 30 days via Developer Tools → Services:**
+
+```yaml
+service: coolblue_energy.reimport_statistics
+data:
+  start_date: "2026-03-05"
+```
+
+> After the reimport finishes the coordinator triggers an automatic refresh, so
+> the Energy Dashboard updates without a restart.
 
 ---
 
@@ -96,18 +138,13 @@ them as daily and monthly totals.
 
 Six sensor entities are created under the **Coolblue Energy** device:
 
-| Entity                                    | Unit  | Description                               |
-|-------------------------------------------|-------|-------------------------------------------|
-| `sensor.yesterday_s_electricity`          | kWh   | Total electricity consumed yesterday      |
-| `sensor.yesterday_s_electricity_returned` | kWh   | Total solar production returned yesterday |
-| `sensor.yesterday_s_gas`                  | m³    | Total gas consumed yesterday              |
-| `sensor.spot_price`                       | €/kWh | Last settled spot price of the day        |
-| `sensor.daily_electricity_cost`           | €     | Total electricity cost yesterday          |
-| `sensor.daily_gas_cost`                   | €     | Total gas cost yesterday                  |
-
-These sensors show **yesterday's** totals and update every 6 hours. They use
-`state_class: measurement` so that HA's recorder does not create conflicting
-statistics alongside the external statistics injected for the Energy Dashboard.
+| Entity                          | Unit | Description                               |
+|---------------------------------|------|-------------------------------------------|
+| `sensor.electricity_consumed`   | kWh  | Total electricity consumed yesterday      |
+| `sensor.electricity_returned`   | kWh  | Total solar production returned yesterday |
+| `sensor.gas_consumed`           | m³   | Total gas consumed yesterday              |
+| `sensor.daily_electricity_cost` | €    | Total electricity cost yesterday          |
+| `sensor.daily_gas_cost`         | €    | Total gas cost yesterday                  |
 
 ---
 
