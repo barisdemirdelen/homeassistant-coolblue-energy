@@ -21,7 +21,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_NAME, DOMAIN, EUR_KWH
+from .const import DEFAULT_NAME, DOMAIN
 from .coordinator import CoolblueCoordinator, CoordinatorData
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,19 +68,6 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
         suggested_display_precision=3,
         value_fn=lambda d: sum(e.gas for e in d.gas) if d.gas else None,
     ),
-    # ── Informational ─────────────────────────────────────────────────────────
-    CoolblueSensorDescription(
-        key="spot_price",
-        translation_key="spot_price",
-        native_unit_of_measurement=EUR_KWH,
-        suggested_display_precision=4,
-        # Last non-zero price in the day's entries (most recent settled hour).
-        value_fn=lambda d: (
-            next((e.price for e in reversed(d.electricity) if e.price), None)
-            if d.electricity
-            else None
-        ),
-    ),
     CoolblueSensorDescription(
         key="daily_electricity_cost",
         translation_key="daily_electricity_cost",
@@ -88,9 +75,7 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=2,
         value_fn=lambda d: (
-            sum(e.costs.electricity.total for e in d.electricity)
-            if d.electricity
-            else None
+            sum(e.costs.electricity.total for e in d.costs) if d.costs else None
         ),
     ),
     CoolblueSensorDescription(
@@ -99,7 +84,7 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=2,
-        value_fn=lambda d: sum(e.costs.gas.total for e in d.gas) if d.gas else None,
+        value_fn=lambda d: sum(e.costs.gas.total for e in d.costs) if d.costs else None,
     ),
 )
 

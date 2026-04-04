@@ -37,9 +37,6 @@
       "gas_consumed": {
         "name": "Gas consumed"
       },
-      "spot_price": {
-        "name": "Current spot price"
-      },
       "daily_electricity_cost": {
         "name": "Electricity cost"
       },

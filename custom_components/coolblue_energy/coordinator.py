@@ -11,7 +11,7 @@ can display it.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -76,6 +76,8 @@ class CoordinatorData:
 
     electricity: list[MeterReadingEntry]
     gas: list[MeterReadingEntry]
+    costs: list[MeterReadingEntry] = field(default_factory=list)
+    """Hourly cost breakdown (from the separate 'costs' API request)."""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -172,7 +174,7 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         for day in days:
             try:
-                electricity, gas = await self._fetch_day(day)
+                electricity, gas, costs = await self._fetch_day(day)
                 any_success = True
                 if not electricity and not gas:
                     _LOGGER.debug(
@@ -184,7 +186,9 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 seed_sums = await self._inject_statistics(
                     electricity, gas, day, seed_sums
                 )
-                last_data = CoordinatorData(electricity=electricity, gas=gas)
+                last_data = CoordinatorData(
+                    electricity=electricity, gas=gas, costs=costs
+                )
             except Exception as exc:
                 _LOGGER.warning(
                     "Failed to fetch data for %s, skipping.", day, exc_info=True
@@ -253,16 +257,18 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     async def _fetch_day(
         self, day: date
-    ) -> tuple[list[MeterReadingEntry], list[MeterReadingEntry]]:
-        """Fetch hourly electricity and gas data for *day* from the API.
+    ) -> tuple[list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]]:
+        """Fetch hourly electricity, gas and cost data for *day* from the API.
 
         Each energy type is fetched independently so that a missing contract
         (electricity-only or gas-only account) does not prevent the other type
-        from being ingested.  Only when *both* fetches fail is an exception
-        raised.
+        from being ingested.  The cost request is always treated as optional —
+        its failure never causes the day to be skipped.  Only when *both*
+        electricity and gas fail is an exception raised.
         """
         electricity: list[MeterReadingEntry] = []
         gas: list[MeterReadingEntry] = []
+        costs: list[MeterReadingEntry] = []
         electricity_exception: Exception | None = None
         gas_exception: Exception | None = None
 
@@ -292,11 +298,23 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
             gas_exception = exc
             _LOGGER.debug("Could not fetch gas data for %s: %s", day, exc)
 
-        # Both energy types failed — propagate so the caller can handle it.
+        try:
+            costs = await self._client.get_hourly_energy(
+                GetMeterReadingsRequest(
+                    customer_id=self._debtor_id,
+                    connection_uuid=self._location_id,
+                    energy_type="costs",
+                    for_date=day,
+                )
+            )
+        except Exception as exc:
+            _LOGGER.debug("Could not fetch cost data for %s: %s", day, exc)
+
+        # Both consumption types failed — propagate so the caller can handle it.
         if electricity_exception is not None and gas_exception is not None:
             raise electricity_exception
 
-        return electricity, gas
+        return electricity, gas, costs
 
     async def _get_sum_before(self, stat_id: str, before_dt: datetime) -> float:
         """

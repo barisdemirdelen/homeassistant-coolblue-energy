@@ -40,7 +40,7 @@ class GetMeterReadingsRequest(CamelCaseModel):
     connection_uuid: str
     """Location UUID, e.g. ``"3addb383-a979-40b4-8487-0f3bc0854da5"``."""
 
-    energy_type: Literal["electricity", "gas"] = "electricity"
+    energy_type: Literal["electricity", "gas", "costs"]
     """Which meter to query."""
 
     for_date: date = Field(default_factory=date.today)

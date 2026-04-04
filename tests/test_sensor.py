@@ -14,10 +14,10 @@ import pytest
 from custom_components.coolblue_energy.coordinator import CoordinatorData
 from custom_components.coolblue_energy.sensor import _SENSORS, CoolblueSensor
 
-from .conftest import make_day_electricity, make_day_gas, make_electricity_entry
+from .conftest import make_day_costs, make_day_electricity, make_day_gas
 
 
-def _make_sensor(key: str, electricity=None, gas=None) -> CoolblueSensor:
+def _make_sensor(key: str, electricity=None, gas=None, costs=None) -> CoolblueSensor:
     """Instantiate a sensor entity bypassing HA entity registry."""
     desc = next(d for d in _SENSORS if d.key == key)
     sensor = object.__new__(CoolblueSensor)
@@ -26,6 +26,7 @@ def _make_sensor(key: str, electricity=None, gas=None) -> CoolblueSensor:
     sensor.coordinator.data = CoordinatorData(
         electricity=electricity if electricity is not None else make_day_electricity(),
         gas=gas if gas is not None else make_day_gas(),
+        costs=costs if costs is not None else make_day_costs(),
     )
     return sensor
 
@@ -49,17 +50,21 @@ class TestNativeValue:
         """24 h × 0.05 m³ = 1.2 m³."""
         assert _make_sensor("gas_consumed").native_value == pytest.approx(1.2)
 
-    def test_spot_price_last_nonzero(self):
-        """Returns last non-zero price from the electricity entries."""
-        assert _make_sensor("spot_price").native_value == pytest.approx(0.25)
-
     def test_daily_electricity_cost(self):
-        """24 h × €0.25 = €6.00."""
+        """24 cost entries × €0.25 = €6.00 (from costs request, includes fixed fee)."""
         assert _make_sensor("daily_electricity_cost").native_value == pytest.approx(6.0)
 
     def test_daily_gas_cost(self):
-        """24 gas entries × €0.10 = €2.40."""
+        """24 cost entries × €0.10 = €2.40 (from costs request, includes fixed fee)."""
         assert _make_sensor("daily_gas_cost").native_value == pytest.approx(2.4)
+
+    def test_daily_electricity_cost_empty_costs(self):
+        """Empty costs list must return None, not 0.0."""
+        assert _make_sensor("daily_electricity_cost", costs=[]).native_value is None
+
+    def test_daily_gas_cost_empty_costs(self):
+        """Empty costs list must return None, not 0.0."""
+        assert _make_sensor("daily_gas_cost", costs=[]).native_value is None
 
     def test_all_sensors_return_none_when_data_is_none(self):
         """All sensors must handle coordinator.data = None without raising."""
@@ -82,28 +87,6 @@ class TestNativeValue:
 
     def test_electricity_returned_empty_elec(self):
         assert _make_sensor("electricity_returned", electricity=[]).native_value is None
-
-    def test_spot_price_all_zero_prices(self):
-        """When every price is 0.0 (falsy), spot_price returns None."""
-        entries = [make_electricity_entry(h, price=0.0) for h in range(24)]
-        assert _make_sensor("spot_price", electricity=entries).native_value is None
-
-    def test_spot_price_picks_last_nonzero(self):
-        """If only the last hour has a non-zero price, that value is returned."""
-        entries = [make_electricity_entry(h, price=0.0) for h in range(23)]
-        entries.append(make_electricity_entry(23, price=0.42))
-        assert _make_sensor(
-            "spot_price", electricity=entries
-        ).native_value == pytest.approx(0.42)
-
-    def test_spot_price_ignores_trailing_zeros(self):
-        """If the last hours have price=0.0, the latest *non-zero* price is used."""
-        entries = [make_electricity_entry(h, price=0.30) for h in range(20)]
-        entries += [make_electricity_entry(h, price=0.0) for h in range(20, 24)]
-        # reversed scan hits hour 19 (price=0.30) first
-        assert _make_sensor(
-            "spot_price", electricity=entries
-        ).native_value == pytest.approx(0.30)
 
     def test_sensor_unique_ids_are_distinct(self):
         """Each sensor description must have a distinct key (used for unique_id)."""

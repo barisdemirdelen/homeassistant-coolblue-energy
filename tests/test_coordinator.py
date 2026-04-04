@@ -315,11 +315,11 @@ class TestInjectStatistics:
 
 class TestAsyncBackfill:
     async def test_fetches_elec_and_gas_for_each_day(self, coordinator):
-        """get_hourly_energy must be called twice per day (elec + gas)."""
+        """get_hourly_energy must be called three times per day (elec + gas + costs)."""
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator._async_backfill(BACKFILL_DAYS)
 
-        assert coordinator._client.get_hourly_energy.call_count == BACKFILL_DAYS * 2
+        assert coordinator._client.get_hourly_energy.call_count == BACKFILL_DAYS * 3
 
     async def test_returns_yesterday_coordinator_data(
         self, coordinator, fake_electricity, fake_gas
@@ -471,11 +471,11 @@ class TestAsyncRetryRecentDays:
     # ── basic coverage ────────────────────────────────────────────────────────
 
     async def test_fetches_all_days(self, coordinator):
-        """get_hourly_energy must be called 2× per day (elec + gas)."""
+        """get_hourly_energy must be called 3× per day (elec + gas + costs)."""
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
-        assert coordinator._client.get_hourly_energy.call_count == 3 * 2
+        assert coordinator._client.get_hourly_energy.call_count == 3 * 3
 
     async def test_returns_yesterday_data_when_all_available(
         self, coordinator, fake_electricity, fake_gas
@@ -575,7 +575,7 @@ class TestAsyncRetryRecentDays:
         self, coordinator
     ):
         """If every day returns ([], []), return CoordinatorData([], [])."""
-        coordinator._fetch_day = AsyncMock(return_value=([], []))
+        coordinator._fetch_day = AsyncMock(return_value=([], [], []))
 
         with patch(_ADD_PATH):
             result = await coordinator._async_retry_recent_days(3)
@@ -711,15 +711,15 @@ class TestAsyncReimportStatistics:
     # ── basic coverage ────────────────────────────────────────────────────────
 
     async def test_fetches_correct_number_of_days(self, coordinator):
-        """get_hourly_energy is called 2× for each day in the requested range."""
+        """get_hourly_energy is called 3× for each day in the requested range."""
         start = date.today() - timedelta(days=5)
         coordinator.async_refresh = AsyncMock()
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
 
-        # 5 days (start … yesterday) × 2 calls (elec + gas)
-        assert coordinator._client.get_hourly_energy.call_count == 5 * 2
+        # 5 days (start … yesterday) × 3 calls (elec + gas + costs)
+        assert coordinator._client.get_hourly_energy.call_count == 5 * 3
 
     async def test_fetches_single_day_when_start_is_yesterday(self, coordinator):
         """Passing yesterday as start_date must result in exactly one day fetched."""
@@ -729,7 +729,7 @@ class TestAsyncReimportStatistics:
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
 
-        assert coordinator._client.get_hourly_energy.call_count == 2
+        assert coordinator._client.get_hourly_energy.call_count == 3
 
     async def test_does_nothing_when_start_is_today(self, coordinator):
         """start_date == today must not fetch anything."""
@@ -879,7 +879,7 @@ class TestFetchDay:
         self, coordinator, fake_electricity, fake_gas
     ):
         """Normal case: both energy types return data."""
-        electricity, gas = await coordinator._fetch_day(
+        electricity, gas, costs = await coordinator._fetch_day(
             date.today() - timedelta(days=1)
         )
         assert electricity == fake_electricity
@@ -897,7 +897,7 @@ class TestFetchDay:
 
         coordinator._client.get_hourly_energy.side_effect = side_effect
 
-        electricity, gas = await coordinator._fetch_day(
+        electricity, gas, costs = await coordinator._fetch_day(
             date.today() - timedelta(days=1)
         )
         assert electricity == []
@@ -915,7 +915,7 @@ class TestFetchDay:
 
         coordinator._client.get_hourly_energy.side_effect = side_effect
 
-        electricity, gas = await coordinator._fetch_day(
+        electricity, gas, costs = await coordinator._fetch_day(
             date.today() - timedelta(days=1)
         )
         assert electricity == fake_electricity
@@ -942,12 +942,12 @@ class TestFetchDay:
 
         coordinator._client.get_hourly_energy.side_effect = side_effect
 
-        electricity, gas = await coordinator._fetch_day(
+        electricity, gas, costs = await coordinator._fetch_day(
             date.today() - timedelta(days=1)
         )
         assert electricity == fake_electricity
         assert gas == []
-        assert call_count[0] == 2  # both fetches were attempted
+        assert call_count[0] == 3  # all three fetches were attempted (elec + gas + costs)
 
 
 # ── Partial-contract integration tests ────────────────────────────────────────
