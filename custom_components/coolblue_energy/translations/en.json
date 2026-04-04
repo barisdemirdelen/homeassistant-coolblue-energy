@@ -29,19 +29,19 @@
   "entity": {
     "sensor": {
       "electricity_consumed": {
-        "name": "Electricity consumed"
+        "name": "Electricity consumed (Yesterday)"
       },
       "electricity_returned": {
-        "name": "Electricity returned to the grid"
+        "name": "Electricity returned to the grid (Yesterday)"
       },
       "gas_consumed": {
         "name": "Gas consumed"
       },
       "daily_electricity_cost": {
-        "name": "Electricity cost"
+        "name": "Electricity cost (Yesterday)"
       },
       "daily_gas_cost": {
-        "name": "Gas cost"
+        "name": "Gas cost (Yesterday)"
       }
     }
   },

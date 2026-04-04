@@ -76,13 +76,13 @@ new password.
 After the first successful data fetch, navigate to **Settings → Dashboards → Energy**
 and add the statistics injected by this integration:
 
-| Statistic ID                    | Use for                |
-|---------------------------------|------------------------|
-| `coolblue:electricity_consumed` | Grid consumption       |
-| `coolblue:electricity_returned` | Return to grid (solar) |
-| `coolblue:gas_consumed`         | Gas consumption        |
-| `coolblue:electricity_cost`     | Electricity cost (€)   |
-| `coolblue:gas_cost`             | Gas cost (€)           |
+| Statistic ID                           | Use for                |
+|----------------------------------------|------------------------|
+| `coolblue_energy:electricity_consumed` | Grid consumption       |
+| `coolblue_energy:electricity_returned` | Return to grid (solar) |
+| `coolblue_energy:gas_consumed`         | Gas consumption        |
+| `coolblue_energy:electricity_cost`     | Electricity cost (€)   |
+| `coolblue_energy:gas_cost`             | Gas cost (€)           |
 
 The integration injects cumulative hourly sums — the Energy Dashboard will display
 them as daily and monthly totals.
@@ -92,18 +92,18 @@ them as daily and monthly totals.
 #### Electricity grid
 
 1. Under **Electricity grid**, click **Add consumption** and select
-   `coolblue:electricity_consumed` (labelled *Coolblue Electricity Consumed*).
-2. Click **Add return** and select `coolblue:electricity_returned`
+   `coolblue_energy:electricity_consumed` (labelled *Coolblue Electricity Consumed*).
+2. Click **Add return** and select `coolblue_energy:electricity_returned`
    (labelled *Coolblue Electricity Returned*).
 3. For **Cost**, choose **Use an entity tracking the total costs** and select
-   `coolblue:electricity_cost`.
+   `coolblue_energy:electricity_cost`.
 
 #### Gas
 
 1. Under **Gas consumption**, click **Add gas source** and select
-   `coolblue:gas_consumed` (labelled *Coolblue Gas Consumed*).
+   `coolblue_energy:gas_consumed` (labelled *Coolblue Gas Consumed*).
 2. For **Cost**, choose **Use an entity tracking the total costs** and select
-   `coolblue:gas_cost`.
+   `coolblue_energy:gas_cost`.
 
 > **Note:** Data is available from the day _after_ your contract start date.
 > The Coolblue portal only publishes data for **yesterday**, so today's usage
@@ -119,9 +119,9 @@ Re-fetches and re-injects all hourly statistics from a given date through yester
 Use this to fix gaps, negative spikes, or other artefacts in the Energy Dashboard
 (e.g. after a prolonged HA downtime or an API outage).
 
-| Field        | Type   | Required | Description                                      |
-|--------------|--------|----------|--------------------------------------------------|
-| `start_date` | `date` | ✅       | First day to reimport (format: `YYYY-MM-DD`)     |
+| Field        | Type   | Required | Description                                  |
+|--------------|--------|----------|----------------------------------------------|
+| `start_date` | `date` | ✅        | First day to reimport (format: `YYYY-MM-DD`) |
 
 **Example — reimport the last 30 days via Developer Tools → Services:**
 
