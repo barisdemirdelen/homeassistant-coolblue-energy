@@ -35,7 +35,7 @@
         "name": "Electricity returned to the grid (Yesterday)"
       },
       "gas_consumed": {
-        "name": "Gas consumed"
+        "name": "Gas consumed (Yesterday)"
       },
       "daily_electricity_cost": {
         "name": "Electricity cost (Yesterday)"
