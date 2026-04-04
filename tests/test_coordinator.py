@@ -178,7 +178,7 @@ class TestGetSumBefore:
 
 class TestInjectStatistics:
     async def test_returns_correct_end_sums(
-        self, coordinator, fake_electricity, fake_gas
+        self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
         """End-of-day sums = seed + (24 h × hourly delta)."""
         seed = {
@@ -190,17 +190,17 @@ class TestInjectStatistics:
         }
         with patch(_ADD_PATH):
             result = await coordinator._inject_statistics(
-                fake_electricity, fake_gas, date(2026, 1, 14), seed_sums=seed
+                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=seed
             )
 
         assert result[STAT_ELECTRICITY_CONSUMED] == pytest.approx(1024.0)  # +24×1.0
         assert result[STAT_ELECTRICITY_RETURNED] == pytest.approx(204.8)  # +24×0.2
         assert result[STAT_GAS_CONSUMED] == pytest.approx(51.2)  # +24×0.05
-        assert result[STAT_ELECTRICITY_COST] == pytest.approx(106.0)  # +24×0.25
+        assert result[STAT_ELECTRICITY_COST] == pytest.approx(106.0)  # +24×(0.25+0.0)
         assert result[STAT_GAS_COST] == pytest.approx(22.4)  # +24×0.10
 
     async def test_queries_db_when_seed_is_none(
-        self, coordinator, fake_electricity, fake_gas
+        self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
         """seed_sums=None must trigger a _get_sum_before call for each stat."""
         queried = []
@@ -209,25 +209,25 @@ class TestInjectStatistics:
         )
         with patch(_ADD_PATH):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, date(2026, 1, 14), seed_sums=None
+                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=None
             )
 
         assert set(queried) == set(_ALL_STATS)
 
     async def test_does_not_query_db_when_seed_provided(
-        self, coordinator, fake_electricity, fake_gas
+        self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
         """When a valid seed_sums dict is provided, the DB must not be queried."""
         coordinator._get_sum_before = AsyncMock(return_value=0.0)
         with patch(_ADD_PATH):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
             )
 
         coordinator._get_sum_before.assert_not_called()
 
     async def test_statistic_data_timestamps_are_utc(
-        self, coordinator, fake_electricity, fake_gas
+        self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
         """First entry (00:00 Amsterdam on 2026-01-14) must be 2026-01-13 23:00 UTC."""
         captured = {}
@@ -238,7 +238,7 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
             )
 
         assert captured["first_start"] == datetime(
@@ -246,7 +246,7 @@ class TestInjectStatistics:
         )
 
     async def test_statistic_data_sums_accumulate(
-        self, coordinator, fake_electricity, fake_gas
+        self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
         """state = hourly delta; sum = running total. Checked for first 3 hours."""
         captured_elec = []
@@ -257,7 +257,7 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
             )
 
         assert captured_elec[0]["state"] == pytest.approx(1.0)  # hour 0 delta
@@ -266,7 +266,7 @@ class TestInjectStatistics:
         assert captured_elec[1]["sum"] == pytest.approx(2.0)
         assert captured_elec[23]["sum"] == pytest.approx(24.0)  # full day
 
-    async def test_seed_carried_into_sum(self, coordinator, fake_electricity, fake_gas):
+    async def test_seed_carried_into_sum(self, coordinator, fake_electricity, fake_gas, fake_costs):
         """A non-zero seed must offset all sums in the day's StatisticData."""
         seed = {**_EMPTY_SEED, STAT_ELECTRICITY_CONSUMED: 500.0}
         captured_sums = []
@@ -277,14 +277,14 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, date(2026, 1, 14), seed_sums=seed
+                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=seed
             )
 
         assert captured_sums[0] == pytest.approx(501.0)  # 500 + 1 kWh
         assert captured_sums[-1] == pytest.approx(524.0)  # 500 + 24 kWh
 
     async def test_calls_async_add_for_all_stats(
-        self, coordinator, fake_electricity, fake_gas
+        self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
         called_ids = []
 
@@ -293,7 +293,7 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
             )
 
         assert set(called_ids) == set(_ALL_STATS)
@@ -302,7 +302,7 @@ class TestInjectStatistics:
         """Empty entry lists must produce no async_add_external_statistics call."""
         with patch(_ADD_PATH) as mock_add:
             await coordinator._inject_statistics(
-                [], [], date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                [], [], [], date(2026, 1, 14), seed_sums=_EMPTY_SEED
             )
         mock_add.assert_not_called()
 
@@ -316,7 +316,7 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                [], fake_gas, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                [], fake_gas, [], date(2026, 1, 14), seed_sums=_EMPTY_SEED
             )
 
         assert captured["first_state"] == pytest.approx(0.05)

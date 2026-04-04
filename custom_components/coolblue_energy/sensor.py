@@ -71,7 +71,9 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=2,
         value_fn=lambda d: (
-            sum(e.costs.electricity.total for e in d.costs) if d.costs else None
+            sum(e.costs.electricity.total + e.costs.production for e in d.costs)
+            if d.costs
+            else None
         ),
     ),
     CoolblueSensorDescription(

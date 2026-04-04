@@ -190,7 +190,7 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     continue
 
                 seed_sums = await self._inject_statistics(
-                    electricity, gas, day, seed_sums
+                    electricity, gas, costs, day, seed_sums
                 )
                 last_data = CoordinatorData(
                     electricity=electricity, gas=gas, costs=costs
@@ -350,6 +350,7 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self,
         electricity_entries: list[MeterReadingEntry],
         gas_entries: list[MeterReadingEntry],
+        costs_entries: list[MeterReadingEntry],
         for_date: date,
         seed_sums: dict[str, float] | None,
     ) -> dict[str, float]:
@@ -366,6 +367,8 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         day_start_utc = _day_start_utc(for_date)
 
         # (stat_id, entries, value extractor)
+        # Cost stats use costs_entries (which carries the production credit) but are
+        # only injected when the matching consumption contract is present.
         stat_configs = [
             (
                 STAT_ELECTRICITY_CONSUMED,
@@ -380,10 +383,14 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
             (STAT_GAS_CONSUMED, gas_entries, lambda e: e.gas),
             (
                 STAT_ELECTRICITY_COST,
-                electricity_entries,
-                lambda e: e.costs.electricity.total,
+                costs_entries if electricity_entries else [],
+                lambda e: e.costs.electricity.total + e.costs.production,
             ),
-            (STAT_GAS_COST, gas_entries, lambda e: e.costs.gas.total),
+            (
+                STAT_GAS_COST,
+                costs_entries if gas_entries else [],
+                lambda e: e.costs.gas.total,
+            ),
         ]
 
         result_sums: dict[str, float] = {}
@@ -406,6 +413,15 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
             if stat_data:
                 name, unit, unit_class = _STAT_META[stat_id]
+                _LOGGER.debug(
+                    "Injecting %d entries for %s on %s  "
+                    "(sum: %.4f → %.4f)",
+                    len(stat_data),
+                    stat_id,
+                    for_date,
+                    stat_data[0]["sum"] - stat_data[0]["state"],  # seed (start of day)
+                    stat_data[-1]["sum"],  # end of day
+                )
                 metadata = StatisticMetaData(
                     mean_type=StatisticMeanType.NONE,
                     has_sum=True,
@@ -416,6 +432,15 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     unit_of_measurement=unit,
                 )
                 async_add_external_statistics(self.hass, metadata, stat_data)
+            else:
+                _LOGGER.debug(
+                    "Skipping %s on %s — no entries (electricity=%d, gas=%d, costs=%d)",
+                    stat_id,
+                    for_date,
+                    len(electricity_entries),
+                    len(gas_entries),
+                    len(costs_entries),
+                )
 
             result_sums[stat_id] = running_sum
 
