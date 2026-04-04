@@ -14,7 +14,7 @@ import pytest
 from custom_components.coolblue_energy.coordinator import CoordinatorData
 from custom_components.coolblue_energy.sensor import _SENSORS, CoolblueSensor
 
-from .conftest import make_day_elec, make_day_gas, make_elec_entry
+from .conftest import make_day_electricity, make_day_gas, make_electricity_entry
 
 
 def _make_sensor(key: str, electricity=None, gas=None) -> CoolblueSensor:
@@ -24,7 +24,7 @@ def _make_sensor(key: str, electricity=None, gas=None) -> CoolblueSensor:
     sensor.entity_description = desc
     sensor.coordinator = MagicMock()
     sensor.coordinator.data = CoordinatorData(
-        electricity=electricity if electricity is not None else make_day_elec(),
+        electricity=electricity if electricity is not None else make_day_electricity(),
         gas=gas if gas is not None else make_day_gas(),
     )
     return sensor
@@ -85,21 +85,21 @@ class TestNativeValue:
 
     def test_spot_price_all_zero_prices(self):
         """When every price is 0.0 (falsy), spot_price returns None."""
-        entries = [make_elec_entry(h, price=0.0) for h in range(24)]
+        entries = [make_electricity_entry(h, price=0.0) for h in range(24)]
         assert _make_sensor("spot_price", electricity=entries).native_value is None
 
     def test_spot_price_picks_last_nonzero(self):
         """If only the last hour has a non-zero price, that value is returned."""
-        entries = [make_elec_entry(h, price=0.0) for h in range(23)]
-        entries.append(make_elec_entry(23, price=0.42))
+        entries = [make_electricity_entry(h, price=0.0) for h in range(23)]
+        entries.append(make_electricity_entry(23, price=0.42))
         assert _make_sensor(
             "spot_price", electricity=entries
         ).native_value == pytest.approx(0.42)
 
     def test_spot_price_ignores_trailing_zeros(self):
         """If the last hours have price=0.0, the latest *non-zero* price is used."""
-        entries = [make_elec_entry(h, price=0.30) for h in range(20)]
-        entries += [make_elec_entry(h, price=0.0) for h in range(20, 24)]
+        entries = [make_electricity_entry(h, price=0.30) for h in range(20)]
+        entries += [make_electricity_entry(h, price=0.0) for h in range(20, 24)]
         # reversed scan hits hour 19 (price=0.30) first
         assert _make_sensor(
             "spot_price", electricity=entries

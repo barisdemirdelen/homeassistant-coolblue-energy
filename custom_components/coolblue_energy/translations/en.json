@@ -47,5 +47,17 @@
         "name": "Gas cost"
       }
     }
+  },
+  "services": {
+    "reimport_statistics": {
+      "name": "Reimport statistics",
+      "description": "Force a full reimport of hourly electricity and gas statistics from the Coolblue Energy API starting from the given date up to and including yesterday. Existing recorder data for the range is overwritten and cumulative sums are recalculated, which fixes gaps or other artefacts in the Energy Dashboard.",
+      "fields": {
+        "start_date": {
+          "name": "Start date",
+          "description": "The first day to reimport (inclusive). All days through yesterday will be fetched from the API and written to the recorder."
+        }
+      }
+    }
   }
 }

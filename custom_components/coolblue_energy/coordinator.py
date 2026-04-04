@@ -142,29 +142,35 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    async def _async_retry_recent_days(self, days: int) -> CoordinatorData:
+    async def _async_process_day_range(
+        self,
+        days: list[date],
+        *,
+        raise_if_all_fail: bool = False,
+    ) -> CoordinatorData:
         """
-        Re-fetch and re-inject the last *days* days (oldest first).
+        Core loop: fetch and inject statistics for *days* (oldest first).
 
-        Handles delayed Coolblue data: if a day returns no entries it is logged
-        and skipped so it will be retried on the next poll.  Days that already
-        have statistics are safe to re-inject (idempotent).
+        Seed sums are seeded lazily from the DB on the first day that has data
+        and chained to subsequent days without extra DB queries.
 
-        If every single fetch attempt raises an exception (e.g. the API is
-        completely down) the last exception is re-raised so the caller can
-        convert it to ``UpdateFailed``.  Partial failures (some days succeed,
-        some fail) are logged and swallowed — we still return the data we got.
+        Empty days (API returns no entries yet) are skipped and the seed is
+        reset so the next day re-queries the DB for a safe baseline.  Partial
+        fetch failures are logged and the loop continues.
 
-        Returns a ``CoordinatorData`` with the most recent day that had data
-        (usually yesterday).
+        If *raise_if_all_fail* is ``True`` and every attempt raises an
+        exception, the last exception is re-raised so the caller can convert
+        it to ``UpdateFailed`` (used by the regular polling path).
+
+        Returns a ``CoordinatorData`` for the most recent day that had data,
+        or an empty ``CoordinatorData`` if no day returned any entries.
         """
         seed_sums: dict[str, float] | None = None
         last_data: CoordinatorData | None = None
         any_success = False
         last_exc: Exception | None = None
 
-        for offset in range(days, 0, -1):
-            day = date.today() - timedelta(days=offset)
+        for day in days:
             try:
                 electricity, gas = await self._fetch_day(day)
                 any_success = True
@@ -172,8 +178,7 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     _LOGGER.debug(
                         "No data available yet for %s — will retry on next poll.", day
                     )
-                    # Reset seed so the next day queries the DB for a safe baseline.
-                    seed_sums = None
+                    seed_sums = None  # force DB re-query for the next day
                     continue
 
                 seed_sums = await self._inject_statistics(
@@ -181,74 +186,117 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 )
                 last_data = CoordinatorData(electricity=electricity, gas=gas)
             except Exception as exc:
-                _LOGGER.warning("Refresh failed for %s, skipping.", day, exc_info=True)
+                _LOGGER.warning(
+                    "Failed to fetch data for %s, skipping.", day, exc_info=True
+                )
                 seed_sums = None
                 last_exc = exc
 
-        # If every attempt raised an exception re-raise so the outer handler
-        # can wrap it in UpdateFailed and HA shows the integration as unavailable.
-        if not any_success and last_exc is not None:
+        if raise_if_all_fail and not any_success and last_exc is not None:
             raise last_exc
 
-        # If no day had data at all, return an empty payload — sensors will
-        # keep their last known state.
         return last_data or CoordinatorData(electricity=[], gas=[])
 
-    async def _fetch_day(
-        self, day: date
-    ) -> tuple[list[MeterReadingEntry], list[MeterReadingEntry]]:
-        """Fetch hourly electricity and gas data for *day* from the API."""
-        electricity = await self._client.get_hourly_energy(
-            GetMeterReadingsRequest(
-                customer_id=self._debtor_id,
-                connection_uuid=self._location_id,
-                energy_type="electricity",
-                for_date=day,
-            )
-        )
-        gas = await self._client.get_hourly_energy(
-            GetMeterReadingsRequest(
-                customer_id=self._debtor_id,
-                connection_uuid=self._location_id,
-                energy_type="gas",
-                for_date=day,
-            )
-        )
-        return electricity, gas
+    async def _async_retry_recent_days(self, days: int) -> CoordinatorData:
+        """
+        Re-fetch and re-inject the last *days* days (oldest first).
+
+        Used by the regular polling path.  If the API is completely down
+        (every day fails) the last exception is re-raised so HA can mark the
+        integration as unavailable.  Partial failures are swallowed.
+        """
+        day_range = [
+            date.today() - timedelta(days=offset) for offset in range(days, 0, -1)
+        ]
+        return await self._async_process_day_range(day_range, raise_if_all_fail=True)
 
     async def _async_backfill(self, days: int) -> CoordinatorData:
         """
         Inject the last *days* days of history (oldest first).
 
-        Returns yesterday's ``CoordinatorData`` for immediate sensor display.
+        Returns a ``CoordinatorData`` for immediate sensor display.
         """
-        first_day = date.today() - timedelta(days=days)
-        first_dt_utc = _day_start_utc(first_day)
+        day_range = [
+            date.today() - timedelta(days=offset) for offset in range(days, 0, -1)
+        ]
+        return await self._async_process_day_range(day_range)
 
-        # Seed running sums from the last recorded entry *before* our window.
-        seed_sums: dict[str, float] | None = {
-            stat_id: await self._get_sum_before(stat_id, first_dt_utc)
-            for stat_id in _ALL_STAT_IDS
-        }
+    async def async_reimport_statistics(self, start_date: date) -> None:
+        """
+        Reimport all statistics from *start_date* through yesterday (inclusive).
 
-        last_electricity: list[MeterReadingEntry] = []
-        last_gas: list[MeterReadingEntry] = []
+        Fetches hourly data day-by-day, overwrites any existing statistics in
+        the recorder for the range and recalculates cumulative sums.  Use this
+        to fix gaps, negative spikes, or other artefacts in the Energy Dashboard.
+        """
+        yesterday = date.today() - timedelta(days=1)
+        if start_date > yesterday:
+            _LOGGER.warning(
+                "Reimport start_date %s is not before today — nothing to do.",
+                start_date,
+            )
+            return
 
-        for offset in range(days, 0, -1):
-            day = date.today() - timedelta(days=offset)
-            try:
-                electricity, gas = await self._fetch_day(day)
-                seed_sums = await self._inject_statistics(
-                    electricity, gas, day, seed_sums
+        total_days = (yesterday - start_date).days + 1
+        _LOGGER.info(
+            "Starting statistics reimport from %s to %s (%d days).",
+            start_date,
+            yesterday,
+            total_days,
+        )
+
+        day_range = [start_date + timedelta(days=i) for i in range(total_days)]
+        await self._async_process_day_range(day_range)
+
+        _LOGGER.info("Statistics reimport complete.")
+        await self.async_refresh()
+
+    async def _fetch_day(
+        self, day: date
+    ) -> tuple[list[MeterReadingEntry], list[MeterReadingEntry]]:
+        """Fetch hourly electricity and gas data for *day* from the API.
+
+        Each energy type is fetched independently so that a missing contract
+        (electricity-only or gas-only account) does not prevent the other type
+        from being ingested.  Only when *both* fetches fail is an exception
+        raised.
+        """
+        electricity: list[MeterReadingEntry] = []
+        gas: list[MeterReadingEntry] = []
+        electricity_exception: Exception | None = None
+        gas_exception: Exception | None = None
+
+        try:
+            electricity = await self._client.get_hourly_energy(
+                GetMeterReadingsRequest(
+                    customer_id=self._debtor_id,
+                    connection_uuid=self._location_id,
+                    energy_type="electricity",
+                    for_date=day,
                 )
-                if offset == 1:  # yesterday — keep for sensor state
-                    last_electricity, last_gas = electricity, gas
-            except Exception:
-                _LOGGER.warning("Backfill failed for %s, skipping.", day, exc_info=True)
-                # Force a fresh DB query for the next day so sums stay correct.
-                seed_sums = None
+            )
+        except Exception as exc:
+            electricity_exception = exc
+            _LOGGER.debug("Could not fetch electricity data for %s: %s", day, exc)
 
-        return CoordinatorData(electricity=last_electricity, gas=last_gas)
+        try:
+            gas = await self._client.get_hourly_energy(
+                GetMeterReadingsRequest(
+                    customer_id=self._debtor_id,
+                    connection_uuid=self._location_id,
+                    energy_type="gas",
+                    for_date=day,
+                )
+            )
+        except Exception as exc:
+            gas_exception = exc
+            _LOGGER.debug("Could not fetch gas data for %s: %s", day, exc)
+
+        # Both energy types failed — propagate so the caller can handle it.
+        if electricity_exception is not None and gas_exception is not None:
+            raise electricity_exception
+
+        return electricity, gas
 
     async def _get_sum_before(self, stat_id: str, before_dt: datetime) -> float:
         """

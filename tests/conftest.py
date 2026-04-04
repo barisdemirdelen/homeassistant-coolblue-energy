@@ -14,11 +14,10 @@ from custom_components.coolblue_energy.model import (
     SmartDeviceUsage,
 )
 
-
 # ── Factory helpers ───────────────────────────────────────────────────────────
 
 
-def make_elec_entry(
+def make_electricity_entry(
     hour: int,
     elec: float = 1.0,
     production: float = 0.2,
@@ -66,11 +65,11 @@ def make_gas_entry(hour: int, gas: float = 0.05) -> MeterReadingEntry:
     )
 
 
-def make_day_elec(
-    n_hours: int = 24, elec: float = 1.0, production: float = 0.2
+def make_day_electricity(
+    n_hours: int = 24, electricity: float = 1.0, production: float = 0.2
 ) -> list[MeterReadingEntry]:
     """Return *n_hours* uniform electricity entries."""
-    return [make_elec_entry(h, elec=elec, production=production) for h in range(n_hours)]
+    return [make_electricity_entry(h, elec=electricity, production=production) for h in range(n_hours)]
 
 
 def make_day_gas(n_hours: int = 24, gas: float = 0.05) -> list[MeterReadingEntry]:
@@ -82,9 +81,9 @@ def make_day_gas(n_hours: int = 24, gas: float = 0.05) -> list[MeterReadingEntry
 
 
 @pytest.fixture
-def fake_elec() -> list[MeterReadingEntry]:
+def fake_electricity() -> list[MeterReadingEntry]:
     """24 electricity entries: 1.0 kWh/h consumed, 0.2 kWh/h produced."""
-    return make_day_elec()
+    return make_day_electricity()
 
 
 @pytest.fixture
@@ -94,7 +93,7 @@ def fake_gas() -> list[MeterReadingEntry]:
 
 
 @pytest.fixture
-def mock_api_client(fake_elec, fake_gas) -> AsyncMock:
+def mock_api_client(fake_electricity, fake_gas) -> AsyncMock:
     """AsyncMock ApiClient that returns fake entries based on energy_type."""
     client = AsyncMock()
     client.get_energy_ids.return_value = (
@@ -102,7 +101,7 @@ def mock_api_client(fake_elec, fake_gas) -> AsyncMock:
         "3addb383-a979-40b4-8487-0f3bc0854da5",
     )
     client.get_hourly_energy.side_effect = (
-        lambda req: fake_elec if req.energy_type == "electricity" else fake_gas
+        lambda req: fake_electricity if req.energy_type == "electricity" else fake_gas
     )
     return client
 

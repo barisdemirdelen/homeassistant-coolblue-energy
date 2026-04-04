@@ -17,6 +17,10 @@ RETRY_DAYS = 3
 CONF_DEBTOR_ID = "debtor_id"
 CONF_LOCATION_ID = "location_id"
 
+# Service names
+SERVICE_REIMPORT_STATISTICS = "reimport_statistics"
+ATTR_START_DATE = "start_date"
+
 # External statistic IDs — must be prefixed with DOMAIN
 STAT_ELECTRICITY_CONSUMED = f"{DOMAIN}:electricity_consumed"
 STAT_ELECTRICITY_RETURNED = f"{DOMAIN}:electricity_returned"
