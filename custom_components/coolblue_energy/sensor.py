@@ -54,7 +54,7 @@ _SENSORS: tuple[CoolblueSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=3,
         value_fn=lambda d: (
-            sum(e.production.total for e in d.electricity) if d.electricity else None
+            sum(-e.production.total for e in d.electricity) if d.electricity else None
         ),
     ),
     CoolblueSensorDescription(

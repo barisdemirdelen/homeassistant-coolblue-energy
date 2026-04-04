@@ -20,7 +20,7 @@ from custom_components.coolblue_energy.model import (
 def make_electricity_entry(
     hour: int,
     electricity: float = 1.0,
-    production: float = 0.2,
+    production: float = -0.2,
     price: float = 0.25,
     electricity_cost: float = 0.25,
 ) -> MeterReadingEntry:
@@ -28,7 +28,7 @@ def make_electricity_entry(
     return MeterReadingEntry(
         name=f"{hour:02d}:00",
         electricity=PeakUsage(total=electricity, off_peak=0.6, peak=0.4),
-        production=PeakUsage(total=production, off_peak=0.0, peak=0.2),
+        production=PeakUsage(total=production, off_peak=production, peak=0.0),
         costs=HourlyCosts(
             electricity=CostComponent(
                 total=electricity_cost,
@@ -101,7 +101,7 @@ def make_cost_entry(
 
 
 def make_day_electricity(
-    n_hours: int = 24, electricity: float = 1.0, production: float = 0.2
+    n_hours: int = 24, electricity: float = 1.0, production: float = -0.2
 ) -> list[MeterReadingEntry]:
     """Return *n_hours* uniform electricity entries."""
     return [

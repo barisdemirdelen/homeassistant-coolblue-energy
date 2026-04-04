@@ -256,10 +256,12 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
 
         day_range = [start_date + timedelta(days=i) for i in range(total_days)]
-        await self._async_process_day_range(day_range)
+        result = await self._async_process_day_range(day_range)
 
         _LOGGER.info("Statistics reimport complete.")
-        await self.async_refresh()
+        # Use async_set_updated_data instead of async_refresh so that sensor
+        # listeners are notified without triggering another fetch + inject cycle.
+        self.async_set_updated_data(result)
 
     async def _fetch_day(
         self, day: date
@@ -378,7 +380,7 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
             (
                 STAT_ELECTRICITY_RETURNED,
                 electricity_entries,
-                lambda e: e.production.total,
+                lambda e: -e.production.total,
             ),
             (STAT_GAS_CONSUMED, gas_entries, lambda e: e.gas),
             (
