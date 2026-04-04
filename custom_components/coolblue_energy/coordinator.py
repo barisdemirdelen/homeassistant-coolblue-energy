@@ -31,6 +31,7 @@ from .api_client import ApiClient
 from .const import (
     BACKFILL_DAYS,
     DOMAIN,
+    RETRY_DAYS,
     SCAN_INTERVAL,
     STAT_ELECTRICITY_CONSUMED,
     STAT_ELECTRICITY_RETURNED,
@@ -124,7 +125,6 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
     # ── DataUpdateCoordinator hook ────────────────────────────────────────────
 
     async def _async_update_data(self) -> CoordinatorData:
-        yesterday = date.today() - timedelta(days=1)
         try:
             if not self._backfilled:
                 # Back-fill history; yesterday is included as the last day.
@@ -132,15 +132,67 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self._backfilled = True
                 return data
 
-            # Normal daily refresh: re-inject yesterday (idempotent).
-            electricity, gas = await self._fetch_day(yesterday)
-            await self._inject_statistics(electricity, gas, yesterday, seed_sums=None)
-            return CoordinatorData(electricity=electricity, gas=gas)
+            # Normal refresh: re-check the last RETRY_DAYS days.
+            # Coolblue sometimes publishes data late, so we look back further
+            # than just yesterday to catch any days that were empty before.
+            return await self._async_retry_recent_days(RETRY_DAYS)
 
         except Exception as err:
             raise UpdateFailed(f"Error fetching Coolblue data: {err}") from err
 
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    async def _async_retry_recent_days(self, days: int) -> CoordinatorData:
+        """
+        Re-fetch and re-inject the last *days* days (oldest first).
+
+        Handles delayed Coolblue data: if a day returns no entries it is logged
+        and skipped so it will be retried on the next poll.  Days that already
+        have statistics are safe to re-inject (idempotent).
+
+        If every single fetch attempt raises an exception (e.g. the API is
+        completely down) the last exception is re-raised so the caller can
+        convert it to ``UpdateFailed``.  Partial failures (some days succeed,
+        some fail) are logged and swallowed — we still return the data we got.
+
+        Returns a ``CoordinatorData`` with the most recent day that had data
+        (usually yesterday).
+        """
+        seed_sums: dict[str, float] | None = None
+        last_data: CoordinatorData | None = None
+        any_success = False
+        last_exc: Exception | None = None
+
+        for offset in range(days, 0, -1):
+            day = date.today() - timedelta(days=offset)
+            try:
+                electricity, gas = await self._fetch_day(day)
+                any_success = True
+                if not electricity and not gas:
+                    _LOGGER.debug(
+                        "No data available yet for %s — will retry on next poll.", day
+                    )
+                    # Reset seed so the next day queries the DB for a safe baseline.
+                    seed_sums = None
+                    continue
+
+                seed_sums = await self._inject_statistics(
+                    electricity, gas, day, seed_sums
+                )
+                last_data = CoordinatorData(electricity=electricity, gas=gas)
+            except Exception as exc:
+                _LOGGER.warning("Refresh failed for %s, skipping.", day, exc_info=True)
+                seed_sums = None
+                last_exc = exc
+
+        # If every attempt raised an exception re-raise so the outer handler
+        # can wrap it in UpdateFailed and HA shows the integration as unavailable.
+        if not any_success and last_exc is not None:
+            raise last_exc
+
+        # If no day had data at all, return an empty payload — sensors will
+        # keep their last known state.
+        return last_data or CoordinatorData(electricity=[], gas=[])
 
     async def _fetch_day(
         self, day: date

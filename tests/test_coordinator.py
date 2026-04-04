@@ -443,3 +443,250 @@ class TestAsyncUpdateData:
 
         with pytest.raises(UpdateFailed, match="API down"):
             await coordinator._async_update_data()
+
+
+# ── _async_retry_recent_days ──────────────────────────────────────────────────
+
+
+class TestAsyncRetryRecentDays:
+    """
+    Tests for _async_retry_recent_days — the delayed-data retry loop.
+
+    Coolblue sometimes publishes data for a day several hours late.  The
+    method must:
+      - look back N days instead of just yesterday,
+      - skip (and retry next poll) days that return empty lists,
+      - keep processing remaining days after a skip or an exception,
+      - re-raise only when *every* attempt fails (API completely down).
+    """
+
+    # ── basic coverage ────────────────────────────────────────────────────────
+
+    async def test_fetches_all_days(self, coordinator):
+        """get_hourly_energy must be called 2× per day (elec + gas)."""
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+            await coordinator._async_retry_recent_days(3)
+
+        assert coordinator._client.get_hourly_energy.call_count == 3 * 2
+
+    async def test_returns_yesterday_data_when_all_available(
+        self, coordinator, fake_elec, fake_gas
+    ):
+        """When all days have data, CoordinatorData must reflect yesterday's entries."""
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+            result = await coordinator._async_retry_recent_days(3)
+
+        assert result.electricity == fake_elec
+        assert result.gas == fake_gas
+
+    # ── empty-day handling ────────────────────────────────────────────────────
+
+    async def test_skips_injection_for_empty_day(self, coordinator):
+        """A day that returns ([], []) must not trigger async_add_external_statistics."""
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            if (date.today() - day).days == 2:
+                return [], []
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH) as mock_add:
+            await coordinator._async_retry_recent_days(3)
+
+
+    async def test_empty_day_still_processes_remaining_days(self, coordinator):
+        """An empty day must not abort subsequent days — all N fetches must run."""
+        fetch_count = [0]
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            fetch_count[0] += 1
+            if (date.today() - day).days == 2:
+                return [], []
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+            await coordinator._async_retry_recent_days(3)
+
+        assert fetch_count[0] == 3
+
+    async def test_empty_day_resets_seed_for_next_day(self, coordinator):
+        """
+        After an empty day, seed_sums must be reset to None so the following
+        day re-queries the DB for its seed sum rather than using a stale value.
+        """
+        get_sum_calls = []
+
+        async def spy_get_sum(stat_id, dt):
+            get_sum_calls.append(stat_id)
+            return 0.0
+
+        coordinator._get_sum_before = spy_get_sum
+
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            if (date.today() - day).days == 2:
+                return [], []
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_ADD_PATH):
+            await coordinator._async_retry_recent_days(3)
+
+        # day-3 has no prior seed → 3 DB queries
+        # day-2 is empty → seed reset
+        # day-1 has no seed (reset) → 3 more DB queries
+        assert len(get_sum_calls) == 6
+
+    async def test_returns_most_recent_day_with_data_when_yesterday_empty(
+        self, coordinator, fake_elec, fake_gas
+    ):
+        """If yesterday returns empty, CoordinatorData must come from a prior day."""
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            if (date.today() - day).days == 1:  # yesterday
+                return [], []
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+            result = await coordinator._async_retry_recent_days(3)
+
+        # yesterday was empty; last_data comes from the most-recent earlier day
+        assert result.electricity == fake_elec
+        assert result.gas == fake_gas
+
+    async def test_returns_empty_coordinator_data_when_all_days_empty(
+        self, coordinator
+    ):
+        """If every day returns ([], []), return CoordinatorData([], [])."""
+        coordinator._fetch_day = AsyncMock(return_value=([], []))
+
+        with patch(_ADD_PATH):
+            result = await coordinator._async_retry_recent_days(3)
+
+        assert result.electricity == []
+        assert result.gas == []
+
+    # ── exception handling ────────────────────────────────────────────────────
+
+    async def test_partial_failure_still_returns_successful_data(
+        self, coordinator, fake_elec, fake_gas
+    ):
+        """A transient exception on one day must not prevent other days from succeeding."""
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            if (date.today() - day).days == 2:
+                raise RuntimeError("Transient API error")
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+            result = await coordinator._async_retry_recent_days(3)
+
+        assert result.electricity == fake_elec
+        assert result.gas == fake_gas
+
+    async def test_failed_day_does_not_abort_remaining_days(self, coordinator):
+        """An exception on one day must not stop processing of subsequent days."""
+        fetch_count = [0]
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            fetch_count[0] += 1
+            if (date.today() - day).days == 2:
+                raise RuntimeError("Transient error")
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+            await coordinator._async_retry_recent_days(3)
+
+        assert fetch_count[0] == 3
+
+    async def test_all_failures_raises_last_exception(self, coordinator):
+        """If every fetch raises an exception, the last one must bubble up."""
+        coordinator._client.get_hourly_energy.side_effect = RuntimeError("API down")
+
+        with pytest.raises(RuntimeError, match="API down"):
+            await coordinator._async_retry_recent_days(3)
+
+    async def test_partial_failure_does_not_raise(self, coordinator):
+        """As long as at least one day succeeds, no exception must be raised."""
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            if (date.today() - day).days == 3:
+                raise RuntimeError("Oldest day failed")
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+            # Must not raise
+            result = await coordinator._async_retry_recent_days(3)
+
+        assert isinstance(result, CoordinatorData)
+
+    # ── seed-sum chaining ─────────────────────────────────────────────────────
+
+    async def test_seeds_chained_across_consecutive_successful_days(
+        self, coordinator
+    ):
+        """
+        With N consecutive successful days, _get_sum_before must only be called
+        3 times total (once per stat for the oldest day).  The remaining days
+        reuse the chained end-sums without extra DB queries.
+        """
+        get_sum_calls = []
+
+        async def spy_get_sum(stat_id, dt):
+            get_sum_calls.append(stat_id)
+            return 0.0
+
+        coordinator._get_sum_before = spy_get_sum
+
+        with patch(_ADD_PATH):
+            await coordinator._async_retry_recent_days(3)
+
+        assert len(get_sum_calls) == 3  # one per stat, only for the first day
+
+    async def test_failed_day_resets_seed_for_next_day(self, coordinator):
+        """
+        A day that raises an exception must reset the seed so the following
+        day re-queries the DB rather than inheriting a potentially wrong sum.
+        """
+        get_sum_calls = []
+
+        async def spy_get_sum(stat_id, dt):
+            get_sum_calls.append(stat_id)
+            return 0.0
+
+        coordinator._get_sum_before = spy_get_sum
+
+        original_fetch = coordinator._fetch_day
+
+        async def patched_fetch(day):
+            if (date.today() - day).days == 2:
+                raise RuntimeError("Simulated failure")
+            return await original_fetch(day)
+
+        coordinator._fetch_day = patched_fetch
+
+        with patch(_ADD_PATH):
+            await coordinator._async_retry_recent_days(3)
+
+        # day-3: seed=None → 3 queries; day-2 fails → reset; day-1: seed=None → 3 queries
+        assert len(get_sum_calls) == 6
+

@@ -8,6 +8,10 @@ DEFAULT_NAME = "Coolblue Energy"
 PLATFORMS = ["sensor"]
 SCAN_INTERVAL = timedelta(hours=6)
 BACKFILL_DAYS = 7
+# How many recent days to re-check on every normal refresh.
+# Coolblue sometimes publishes data hours late, so we look back this many days
+# to catch any days that were empty on the previous poll.
+RETRY_DAYS = 3
 
 # Config-entry data keys
 CONF_DEBTOR_ID = "debtor_id"
