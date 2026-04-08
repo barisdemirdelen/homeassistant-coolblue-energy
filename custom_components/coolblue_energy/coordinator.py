@@ -15,9 +15,9 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api_client import ApiClient
-from .base_coordinator import EnergyCoordinatorBase
 from .const import (
     BACKFILL_DAYS,
     DOMAIN,
@@ -27,6 +27,7 @@ from .const import (
 from .model import GetMeterReadingsRequest, MeterReadingEntry
 from .recorder import async_inject_day
 from .statistics import (
+
     ELECTRICITY_CONSUMED,
     ELECTRICITY_COST,
     ELECTRICITY_RETURNED,
@@ -35,6 +36,7 @@ from .statistics import (
     GAS_COST,
     _day_start_utc,
 )
+from .statistics_mixin import StatisticsLoopMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ class CoordinatorData:
 # ── Coordinator ───────────────────────────────────────────────────────────────
 
 
-class CoolblueCoordinator(EnergyCoordinatorBase[CoordinatorData]):
+class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[CoordinatorData]):
     """
     Fetches Coolblue Energy data every ``SCAN_INTERVAL`` hours.
 
@@ -81,35 +83,36 @@ class CoolblueCoordinator(EnergyCoordinatorBase[CoordinatorData]):
         self._client = client
         self._debtor_id = debtor_id
         self._location_id = location_id
+        self._last_data: CoordinatorData = CoordinatorData(electricity=[], gas=[])
 
-    def _make_empty_data(self) -> CoordinatorData:
-        return CoordinatorData(electricity=[], gas=[])
-
-
-    # ── EnergyCoordinatorBase hook ────────────────────────────────────────────
+    # ── DataUpdateCoordinator hook ────────────────────────────────────────────
 
     async def _async_update_data(self) -> CoordinatorData:
-        return await self._async_do_update()
+        await self.async_run_statistics_update()
+        return self._last_data
+
+    async def async_reimport_statistics(self, start_date: date) -> None:
+        """Reimport statistics and refresh coordinator data."""
+        await super().async_reimport_statistics(start_date)
+        self.async_set_updated_data(self._last_data)
+
+    # ── StatisticsLoopMixin hook ──────────────────────────────────────────────
 
     async def _process_day(
         self,
         day: date,
         seed_sums: dict[str, float] | None,
-    ) -> tuple[dict[str, float] | None, CoordinatorData | None]:
-        """Fetch and inject one day; return ``(None, None)`` if no data yet."""
+    ) -> dict[str, float] | None:
+        """Fetch and inject one day; return None if no data yet."""
         electricity, gas, costs = await self._fetch_day(day)
         if not electricity and not gas:
             _LOGGER.debug(
                 "No data available yet for %s — will retry on next poll.", day
             )
-            return None, None
+            return None
 
-        new_seed_sums = await self._inject_statistics(
-            electricity, gas, costs, day, seed_sums
-        )
-        return new_seed_sums, CoordinatorData(
-            electricity=electricity, gas=gas, costs=costs
-        )
+        self._last_data = CoordinatorData(electricity=electricity, gas=gas, costs=costs)
+        return await self._inject_statistics(electricity, gas, costs, day, seed_sums)
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

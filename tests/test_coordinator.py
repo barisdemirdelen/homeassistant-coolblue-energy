@@ -428,13 +428,13 @@ class TestAsyncBackfill:
     async def test_returns_yesterday_coordinator_data(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """The returned CoordinatorData must contain yesterday's entries."""
+        """After backfill, coordinator._last_data must contain yesterday's entries."""
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_backfill(BACKFILL_DAYS)
+            await coordinator._async_backfill(BACKFILL_DAYS)
 
-        assert isinstance(result, CoordinatorData)
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert isinstance(coordinator._last_data, CoordinatorData)
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_seeds_are_chained_across_days(self, coordinator):
         """
@@ -510,31 +510,29 @@ class TestAsyncUpdateData:
     async def test_first_run_triggers_backfill(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """On first call (_backfilled=False), backfill is run and flag is set."""
+        """On first call (_stats_backfilled=False), backfill is run and flag is set."""
         backfill_calls = []
 
         async def mock_backfill(days):
             backfill_calls.append(days)
-            return CoordinatorData(electricity=fake_electricity, gas=fake_gas)
 
         coordinator._async_backfill = mock_backfill
 
         result = await coordinator._async_update_data()
 
         assert len(backfill_calls) == 1
-        assert coordinator._backfilled is True
-        assert result.electricity is fake_electricity
+        assert coordinator._stats_backfilled is True
+        assert isinstance(result, CoordinatorData)
 
     async def test_subsequent_run_skips_backfill(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """With _backfilled=True, backfill must NOT run again."""
-        coordinator._backfilled = True
+        """With _stats_backfilled=True, backfill must NOT run again."""
+        coordinator._stats_backfilled = True
         backfill_calls = []
 
         async def mock_backfill(days):
             backfill_calls.append(days)
-            return CoordinatorData(electricity=[], gas=[])
 
         coordinator._async_backfill = mock_backfill
 
@@ -548,9 +546,9 @@ class TestAsyncUpdateData:
         """Any unhandled exception from the API must be re-raised as UpdateFailed."""
         from homeassistant.helpers.update_coordinator import UpdateFailed
 
-        # Use the normal daily-refresh path (_backfilled=True) so the error
+        # Use the normal daily-refresh path (_stats_backfilled=True) so the error
         # propagates directly; the backfill path swallows per-day errors.
-        coordinator._backfilled = True
+        coordinator._stats_backfilled = True
         coordinator._client.get_hourly_energy.side_effect = RuntimeError("API down")
 
         with pytest.raises(UpdateFailed, match="API down"):
@@ -584,22 +582,22 @@ class TestAsyncRetryRecentDays:
     async def test_returns_yesterday_data_when_all_available(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """When all days have data, CoordinatorData must reflect yesterday's entries."""
+        """When all days have data, coordinator._last_data must reflect yesterday's entries."""
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     # ── empty-day handling ────────────────────────────────────────────────────
 
     async def test_skips_injection_for_empty_day(self, coordinator):
-        """A day that returns ([], []) must not trigger async_add_external_statistics."""
+        """A day that returns ([], [], []) must not trigger async_add_external_statistics."""
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
@@ -615,7 +613,7 @@ class TestAsyncRetryRecentDays:
         async def patched_fetch(day):
             fetch_count[0] += 1
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
@@ -642,7 +640,7 @@ class TestAsyncRetryRecentDays:
 
         async def patched_fetch(day):
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
@@ -658,34 +656,34 @@ class TestAsyncRetryRecentDays:
     async def test_returns_most_recent_day_with_data_when_yesterday_empty(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """If yesterday returns empty, CoordinatorData must come from a prior day."""
+        """If yesterday returns empty, coordinator._last_data must come from a prior day."""
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
             if (date.today() - day).days == 1:  # yesterday
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
         # yesterday was empty; last_data comes from the most-recent earlier day
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_returns_empty_coordinator_data_when_all_days_empty(
         self, coordinator
     ):
-        """If every day returns ([], []), return CoordinatorData([], [])."""
+        """If every day returns ([], [], []), coordinator._last_data stays empty."""
         coordinator._fetch_day = AsyncMock(return_value=([], [], []))
 
         with patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert result.electricity == []
-        assert result.gas == []
+        assert coordinator._last_data.electricity == []
+        assert coordinator._last_data.gas == []
 
     # ── exception handling ────────────────────────────────────────────────────
 
@@ -703,10 +701,10 @@ class TestAsyncRetryRecentDays:
         coordinator._fetch_day = patched_fetch
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_failed_day_does_not_abort_remaining_days(self, coordinator):
         """An exception on one day must not stop processing of subsequent days."""
@@ -746,9 +744,9 @@ class TestAsyncRetryRecentDays:
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             # Must not raise
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert isinstance(result, CoordinatorData)
+        assert isinstance(coordinator._last_data, CoordinatorData)
 
     # ── seed-sum chaining ─────────────────────────────────────────────────────
 
@@ -912,7 +910,7 @@ class TestAsyncReimportStatistics:
 
         async def patched_fetch(day):
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
@@ -1119,10 +1117,10 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(1)
+            await coordinator._async_retry_recent_days(1)
 
-        assert result.electricity == fake_electricity
-        assert result.gas == []
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == []
 
     async def test_electricity_only_day_is_not_skipped_as_empty(
         self, coordinator, fake_electricity
@@ -1184,10 +1182,10 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(1)
+            await coordinator._async_retry_recent_days(1)
 
-        assert result.electricity == []
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == []
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_gas_only_day_is_not_skipped_as_empty(self, coordinator, fake_gas):
         """A day with only gas data must NOT be skipped ('no data' guard)."""
@@ -1209,10 +1207,10 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_backfill(3)
+            await coordinator._async_backfill(3)
 
-        assert isinstance(result, CoordinatorData)
-        assert result.electricity == fake_electricity
+        assert isinstance(coordinator._last_data, CoordinatorData)
+        assert coordinator._last_data.electricity == fake_electricity
 
     async def test_gas_only_backfill_works(self, coordinator, fake_gas):
         """Backfill for a gas-only contract must complete without error."""
@@ -1221,7 +1219,7 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_backfill(3)
+            await coordinator._async_backfill(3)
 
-        assert isinstance(result, CoordinatorData)
-        assert result.gas == fake_gas
+        assert isinstance(coordinator._last_data, CoordinatorData)
+        assert coordinator._last_data.gas == fake_gas

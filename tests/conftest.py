@@ -209,7 +209,7 @@ def coordinator(mock_hass, mock_api_client):
     from unittest.mock import MagicMock
 
     from custom_components.coolblue_energy.const import BACKFILL_DAYS, RETRY_DAYS
-    from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
+    from custom_components.coolblue_energy.coordinator import CoolblueCoordinator, CoordinatorData
 
     coord = object.__new__(CoolblueCoordinator)
     coord.hass = mock_hass
@@ -218,7 +218,8 @@ def coordinator(mock_hass, mock_api_client):
     coord._location_id = "3addb383-a979-40b4-8487-0f3bc0854da5"
     coord._backfill_days = BACKFILL_DAYS
     coord._retry_days = RETRY_DAYS
-    coord._backfilled = False
+    coord._stats_backfilled = False
+    coord._last_data = CoordinatorData(electricity=[], gas=[])
     # HA DataUpdateCoordinator methods not available without full __init__
     coord.async_set_updated_data = MagicMock()
     return coord
