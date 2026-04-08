@@ -180,7 +180,7 @@ def mock_hass() -> MagicMock:
     hass.async_add_executor_job = executor_job
 
     # get_instance(hass) must return a recorder-like object with the same
-    # executor so coordinator._get_sum_before works in tests.
+    # executor so async_get_last_sum works in tests.
     mock_recorder = MagicMock()
     mock_recorder.async_add_executor_job = executor_job
     hass._mock_recorder = mock_recorder  # keep a reference for patching
@@ -194,7 +194,7 @@ def patch_get_instance(mock_hass):
     from unittest.mock import patch
 
     with patch(
-        "custom_components.coolblue_energy.coordinator.get_instance",
+        "custom_components.coolblue_energy.recorder.get_instance",
         return_value=mock_hass._mock_recorder,
     ):
         yield
@@ -206,8 +206,9 @@ def coordinator(mock_hass, mock_api_client):
     CoolblueCoordinator with the HA DataUpdateCoordinator infrastructure
     bypassed via ``object.__new__``.
     """
-    from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
     from unittest.mock import MagicMock
+
+    from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
 
     coord = object.__new__(CoolblueCoordinator)
     coord.hass = mock_hass
