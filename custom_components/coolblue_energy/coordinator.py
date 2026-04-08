@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .api_client import ApiClient
+from .base_coordinator import EnergyCoordinatorBase
 from .const import (
     BACKFILL_DAYS,
     DOMAIN,
@@ -54,7 +55,7 @@ class CoordinatorData:
 # ── Coordinator ───────────────────────────────────────────────────────────────
 
 
-class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
+class CoolblueCoordinator(EnergyCoordinatorBase[CoordinatorData]):
     """
     Fetches Coolblue Energy data every ``SCAN_INTERVAL`` hours.
 
@@ -76,6 +77,9 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._location_id = location_id
         self._backfilled = False
 
+    def _make_empty_data(self) -> CoordinatorData:
+        return CoordinatorData(electricity=[], gas=[])
+
     # ── DataUpdateCoordinator hook ────────────────────────────────────────────
 
     async def _async_update_data(self) -> CoordinatorData:
@@ -90,102 +94,29 @@ class CoolblueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         except Exception as err:
             raise UpdateFailed(f"Error fetching Coolblue data: {err}") from err
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    # ── EnergyCoordinatorBase hook ────────────────────────────────────────────
 
-    async def _async_process_day_range(
+    async def _process_day(
         self,
-        days: list[date],
-        *,
-        raise_if_all_fail: bool = False,
-    ) -> CoordinatorData:
-        """
-        Core loop: fetch and inject statistics for *days* (oldest first).
-
-        Seed sums are seeded lazily from the DB on the first day that has data
-        and chained to subsequent days without extra DB queries.
-
-        Empty days (API returns no entries yet) are skipped and the seed is
-        reset so the next day re-queries the DB for a safe baseline.  Partial
-        fetch failures are logged and the loop continues.
-
-        If *raise_if_all_fail* is ``True`` and every attempt raises an
-        exception, the last exception is re-raised so the caller can convert
-        it to ``UpdateFailed`` (used by the regular polling path).
-
-        Returns a ``CoordinatorData`` for the most recent day that had data,
-        or an empty ``CoordinatorData`` if no day returned any entries.
-        """
-        seed_sums: dict[str, float] | None = None
-        last_data: CoordinatorData | None = None
-        any_success = False
-        last_exc: Exception | None = None
-
-        for day in days:
-            try:
-                electricity, gas, costs = await self._fetch_day(day)
-                any_success = True
-                if not electricity and not gas:
-                    _LOGGER.debug(
-                        "No data available yet for %s — will retry on next poll.", day
-                    )
-                    seed_sums = None
-                    continue
-
-                seed_sums = await self._inject_statistics(
-                    electricity, gas, costs, day, seed_sums
-                )
-                last_data = CoordinatorData(
-                    electricity=electricity, gas=gas, costs=costs
-                )
-            except Exception as exc:
-                _LOGGER.warning(
-                    "Failed to fetch data for %s, skipping.", day, exc_info=True
-                )
-                seed_sums = None
-                last_exc = exc
-
-        if raise_if_all_fail and not any_success and last_exc is not None:
-            raise last_exc
-
-        return last_data or CoordinatorData(electricity=[], gas=[])
-
-    async def _async_retry_recent_days(self, days: int) -> CoordinatorData:
-        day_range = [
-            date.today() - timedelta(days=offset) for offset in range(days, 0, -1)
-        ]
-        return await self._async_process_day_range(day_range, raise_if_all_fail=True)
-
-    async def _async_backfill(self, days: int) -> CoordinatorData:
-        day_range = [
-            date.today() - timedelta(days=offset) for offset in range(days, 0, -1)
-        ]
-        return await self._async_process_day_range(day_range)
-
-    async def async_reimport_statistics(self, start_date: date) -> None:
-        """
-        Reimport all statistics from *start_date* through yesterday (inclusive).
-        """
-        yesterday = date.today() - timedelta(days=1)
-        if start_date > yesterday:
-            _LOGGER.warning(
-                "Reimport start_date %s is not before today — nothing to do.",
-                start_date,
+        day: date,
+        seed_sums: dict[str, float] | None,
+    ) -> tuple[dict[str, float] | None, CoordinatorData | None]:
+        """Fetch and inject one day; return ``(None, None)`` if no data yet."""
+        electricity, gas, costs = await self._fetch_day(day)
+        if not electricity and not gas:
+            _LOGGER.debug(
+                "No data available yet for %s — will retry on next poll.", day
             )
-            return
+            return None, None
 
-        total_days = (yesterday - start_date).days + 1
-        _LOGGER.info(
-            "Starting statistics reimport from %s to %s (%d days).",
-            start_date,
-            yesterday,
-            total_days,
+        new_seed_sums = await self._inject_statistics(
+            electricity, gas, costs, day, seed_sums
+        )
+        return new_seed_sums, CoordinatorData(
+            electricity=electricity, gas=gas, costs=costs
         )
 
-        day_range = [start_date + timedelta(days=i) for i in range(total_days)]
-        result = await self._async_process_day_range(day_range)
-
-        _LOGGER.info("Statistics reimport complete.")
-        self.async_set_updated_data(result)
+    # ── Private helpers ───────────────────────────────────────────────────────
 
     async def _fetch_day(
         self, day: date
