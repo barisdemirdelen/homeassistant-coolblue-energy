@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .api_client import ApiClient
 from .base_coordinator import EnergyCoordinatorBase
@@ -71,30 +70,26 @@ class CoolblueCoordinator(EnergyCoordinatorBase[CoordinatorData]):
         debtor_id: str,
         location_id: str,
     ) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL)
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=SCAN_INTERVAL,
+            backfill_days=BACKFILL_DAYS,
+            retry_days=RETRY_DAYS,
+        )
         self._client = client
         self._debtor_id = debtor_id
         self._location_id = location_id
-        self._backfilled = False
 
     def _make_empty_data(self) -> CoordinatorData:
         return CoordinatorData(electricity=[], gas=[])
 
-    # ── DataUpdateCoordinator hook ────────────────────────────────────────────
-
-    async def _async_update_data(self) -> CoordinatorData:
-        try:
-            if not self._backfilled:
-                data = await self._async_backfill(BACKFILL_DAYS)
-                self._backfilled = True
-                return data
-
-            return await self._async_retry_recent_days(RETRY_DAYS)
-
-        except Exception as err:
-            raise UpdateFailed(f"Error fetching Coolblue data: {err}") from err
 
     # ── EnergyCoordinatorBase hook ────────────────────────────────────────────
+
+    async def _async_update_data(self) -> CoordinatorData:
+        return await self._async_do_update()
 
     async def _process_day(
         self,

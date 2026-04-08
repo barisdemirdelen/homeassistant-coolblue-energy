@@ -16,7 +16,7 @@ from abc import abstractmethod
 from datetime import date, timedelta
 from typing import Generic, TypeVar
 
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,11 +27,44 @@ class EnergyCoordinatorBase(DataUpdateCoordinator[DataT], Generic[DataT]):
     """
     Coordinator base that owns the backfill / retry / reimport control flow.
 
+    Pass *backfill_days* and *retry_days* to ``__init__`` (forwarded via
+    ``super().__init__`` in the subclass).  All remaining keyword arguments
+    are forwarded to ``DataUpdateCoordinator``.
+
     Subclasses must implement:
 
     * ``_process_day`` — fetch + inject one calendar day.
     * ``_make_empty_data`` — zero-data fallback when no day had readings.
     """
+
+    def __init__(self, *args, backfill_days: int, retry_days: int, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._backfill_days = backfill_days
+        self._retry_days = retry_days
+        self._backfilled = False
+
+    # ── Backfill / retry helper ───────────────────────────────────────────────
+
+    async def _async_do_update(self) -> DataT:
+        """
+        Run one update cycle: backfill on the first call, retry recent days
+        on every subsequent call.
+
+        Call this from ``_async_update_data`` in your subclass, optionally
+        wrapping it with extra logic before or after.
+
+        Raises ``UpdateFailed`` on unhandled errors.
+        """
+        try:
+            if not self._backfilled:
+                data = await self._async_backfill(self._backfill_days)
+                self._backfilled = True
+                return data
+
+            return await self._async_retry_recent_days(self._retry_days)
+
+        except Exception as err:
+            raise UpdateFailed(f"Error fetching energy data: {err}") from err
 
     @abstractmethod
     async def _process_day(
