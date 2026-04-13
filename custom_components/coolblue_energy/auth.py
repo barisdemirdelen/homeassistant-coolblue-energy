@@ -37,6 +37,18 @@ _AUTH_BASE = (
 
 _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:149.0) Gecko/20100101 Firefox/149.0"
 
+# Headers sent on every HTML page request (mirrors a real Firefox GET of a document).
+_BROWSER_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-User": "?1",
+    "DNT": "1",
+}
+
 
 def _auth_url() -> str:
     """Build an OIDC authorize URL with fresh state and nonce values."""
@@ -104,12 +116,7 @@ class AuthService:
         if self._session and not self._session.closed:
             await self._session.close()
 
-        session = aiohttp.ClientSession(
-            headers={
-                "User-Agent": _USER_AGENT,
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-        )
+        session = aiohttp.ClientSession(headers=_BROWSER_HEADERS)
 
         try:
             logger.debug("Auth round 1: establish Coolblue-Session")
@@ -120,17 +127,36 @@ class AuthService:
             # callback to also issue Secure-Coolblue.
             logger.debug("Auth round 2: obtain Secure-Coolblue")
             async with session.get(self._energy_url, allow_redirects=False) as r:
+                logger.debug("Round 2 energy page status: %d", r.status)
                 if r.status == 307:
                     loc = r.headers.get("Location", "")
                     if loc.startswith("/"):
                         loc = "https://www.coolblue.nl" + loc
                     async with session.get(loc, allow_redirects=False) as r2:
+                        logger.debug(
+                            "Round 2 login redirect status: %d → %s",
+                            r2.status,
+                            r2.headers.get("Location", "(none)")[:80],
+                        )
                         if r2.status in (301, 302, 303, 307, 308):
                             accounts_url = r2.headers["Location"]
                             logger.debug("Round 2 accounts URL: %s", accounts_url[:80])
                             await self._oidc_round(session, accounts_url)
+                        else:
+                            logger.warning(
+                                "Round 2: expected a redirect from login page "
+                                "but got %d — Secure-Coolblue will not be set",
+                                r2.status,
+                            )
+                else:
+                    logger.warning(
+                        "Round 2: expected 307 from energy page but got %d "
+                        "— Secure-Coolblue will not be set",
+                        r.status,
+                    )
 
-        except Exception:
+        except Exception as exc:
+            logger.error("Authentication failed: %s", exc)
             await session.close()
             raise
 
@@ -144,7 +170,15 @@ class AuthService:
     async def _oidc_round(self, session: aiohttp.ClientSession, auth_url: str) -> None:
         """Complete one OIDC email + password round starting from *auth_url*."""
         logger.debug("OIDC round: GET %s", auth_url[:80])
-        async with session.get(auth_url) as r:
+        async with session.get(
+            auth_url, headers={"Sec-Fetch-Site": "none"}
+        ) as r:
+            if r.status == 403:
+                raise RuntimeError(
+                    f"Cloudfront blocked the accounts login page (403). "
+                    f"URL: {str(r.url)[:100]} — your IP may be rate-limited or "
+                    "Coolblue has tightened WAF rules."
+                )
             r.raise_for_status()
             html = await r.text()
             page_url = str(r.url)
@@ -153,12 +187,22 @@ class AuthService:
         async with session.post(
             page_url,
             data={"view": "email-exists", "csrf": csrf, "username": self._email},
+            headers={"Sec-Fetch-Site": "same-origin", "Referer": page_url},
         ) as r:
+            if r.status == 403:
+                raise RuntimeError(
+                    f"Cloudfront blocked the email-check POST (403). "
+                    f"URL: {str(r.url)[:100]}"
+                )
             r.raise_for_status()
             html = await r.text()
             page_url = str(r.url)
 
         csrf = _get_csrf(html, "login")
+        # Stop before the final redirect — accounts.coolblue.nl will redirect
+        # to www.coolblue.nl/en/login/oidc, which is a cross-site navigation.
+        # We replay that redirect ourselves with the correct Sec-Fetch-Site
+        # header so Cloudfront does not block it.
         async with session.post(
             page_url,
             data={
@@ -167,11 +211,45 @@ class AuthService:
                 "username": self._email,
                 "password": self._password,
             },
+            headers={"Sec-Fetch-Site": "same-origin", "Referer": page_url},
+            allow_redirects=False,
         ) as r:
+            if r.status == 403:
+                raise RuntimeError(
+                    f"Cloudfront blocked the password POST (403). "
+                    f"URL: {str(r.url)[:100]}"
+                )
+            if r.status not in (301, 302, 303, 307, 308):
+                r.raise_for_status()
+                raise RuntimeError(
+                    "OIDC round: expected a redirect after password POST "
+                    f"but got {r.status}. Check credentials."
+                )
+            callback_url = r.headers["Location"]
+            if callback_url.startswith("/"):
+                callback_url = "https://accounts.coolblue.nl" + callback_url
+
+        logger.debug("OIDC callback: GET %s", callback_url[:80])
+        # Follow all subsequent redirects normally; only the first hop (from
+        # accounts → www.coolblue.nl) needs Sec-Fetch-Site: cross-site.
+        async with session.get(
+            callback_url,
+            headers={
+                "Sec-Fetch-Site": "cross-site",
+                "Referer": "https://accounts.coolblue.nl/",
+            },
+        ) as r:
+            if r.status == 403:
+                raise RuntimeError(
+                    f"Cloudfront blocked the OIDC callback (403). "
+                    f"URL: {str(r.url)[:100]} — your IP may be rate-limited or "
+                    "Coolblue has tightened WAF rules. Try again later."
+                )
             r.raise_for_status()
             if "accounts.coolblue.nl" in str(r.url):
                 raise RuntimeError(
-                    "OIDC round failed – still on accounts page. Check credentials."
+                    "OIDC round failed – still on accounts page after callback. "
+                    "Check credentials."
                 )
 
     async def close(self) -> None:
