@@ -25,7 +25,12 @@ from .coordinator import CoolblueCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-_REIMPORT_SCHEMA = vol.Schema({vol.Required(ATTR_START_DATE): cv.date})
+_REIMPORT_SCHEMA = vol.Schema(
+    {
+        vol.Optional("config_entry_id"): cv.string,
+        vol.Required(ATTR_START_DATE): cv.date,
+    }
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -52,7 +57,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async def _handle_reimport(call: ServiceCall) -> None:
             start_date: date = call.data[ATTR_START_DATE]
-            for entry_data in hass.data.get(DOMAIN, {}).values():
+            target_entry_id: str | None = call.data.get("config_entry_id")
+            all_entries: dict = hass.data.get(DOMAIN, {})
+            entries = (
+                {target_entry_id: all_entries[target_entry_id]}
+                if target_entry_id and target_entry_id in all_entries
+                else all_entries
+            )
+            for entry_data in entries.values():
                 coord: CoolblueCoordinator = entry_data["coordinator"]
                 await coord.async_reimport_statistics(start_date)
 

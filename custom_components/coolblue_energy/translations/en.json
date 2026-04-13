@@ -28,9 +28,13 @@
   },
   "services": {
     "reimport_statistics": {
-      "name": "Reimport statistics",
-      "description": "Force a full reimport of hourly electricity and gas statistics from the Coolblue Energy API starting from the given date up to and including yesterday. Existing recorder data for the range is overwritten and cumulative sums are recalculated, which fixes gaps or other artefacts in the Energy Dashboard.",
+      "name": "Reimport hourly statistics",
+      "description": "Force a full reimport of hourly electricity and gas statistics from the Coolblue Energy API starting from the given date up to and including yesterday. Existing recorder data for the range is overwritten and cumulative sums are recalculated, which fixes gaps, negative spikes, or other artefacts in the Energy Dashboard.",
       "fields": {
+        "config_entry_id": {
+          "name": "Account",
+          "description": "Which Coolblue Energy account to reimport. Leave empty to reimport all configured accounts."
+        },
         "start_date": {
           "name": "Start date",
           "description": "The first day to reimport (inclusive). All days through yesterday will be fetched from the API and written to the recorder."
