@@ -30,7 +30,9 @@ from custom_components.coolblue_energy.const import (
 from custom_components.coolblue_energy.coordinator import (
     CoordinatorData,
 )
-from custom_components.coolblue_energy.recorder import async_get_last_sum
+from custom_components.coolblue_energy.ha_external_statistics.recorder import (
+    async_get_last_sum,
+)
 from custom_components.coolblue_energy.statistics import (
     _day_start_utc,
     _entry_to_utc,
@@ -38,11 +40,9 @@ from custom_components.coolblue_energy.statistics import (
 
 from .conftest import make_day_electricity, make_day_gas
 
-_STATS_PATH = "custom_components.coolblue_energy.recorder.statistics_during_period"
-_ADD_PATH = (
-    "custom_components.coolblue_energy.external_statistic.async_add_external_statistics"
-)
-_GET_SUM_PATH = "custom_components.coolblue_energy.recorder.async_get_last_sum"
+_STATS_PATH = "custom_components.coolblue_energy.ha_external_statistics.recorder.statistics_during_period"
+_GET_SUM_PATH = "custom_components.coolblue_energy.ha_external_statistics.recorder.async_get_last_sum"
+_ADD_PATH = "custom_components.coolblue_energy.ha_external_statistics.external_statistic.async_add_external_statistics"
 
 _ALL_STATS = (
     STAT_ELECTRICITY_CONSUMED,
@@ -173,7 +173,9 @@ class TestGetSumBefore:
             return {}
 
         with patch(_STATS_PATH, side_effect=capture):
-            await async_get_last_sum(coordinator.hass, STAT_ELECTRICITY_CONSUMED, before_dt)
+            await async_get_last_sum(
+                coordinator.hass, STAT_ELECTRICITY_CONSUMED, before_dt
+            )
 
         assert captured["start"] == expected_start
 
@@ -454,10 +456,11 @@ class TestAsyncBackfill:
         # 3 initial seeds, no more (seeds chained for days 2 and 3)
         assert len(get_sum_calls) == 6
 
-    async def test_failed_day_causes_db_requery_for_next(self, coordinator):
+    async def test_failed_day_keeps_seed_for_next_day(self, coordinator):
         """
-        A day that raises an exception must reset seed_sums to None so the
-        following day re-seeds from the DB (3 extra _get_sum_before calls).
+        A day that raises an exception must keep the existing seed_sums so the
+        following day continues from the last-successful sum without re-querying
+        the DB (treating the failed day as zero consumption).
         """
         get_sum_calls = []
 
@@ -478,8 +481,9 @@ class TestAsyncBackfill:
         with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator._async_backfill(7)
 
-        # 6 initial + 6 after the failure = at least 12
-        assert len(get_sum_calls) >= 12
+        # Only the initial 6 DB queries (seed for the first day); the failed day
+        # keeps the existing seed so no extra DB queries are issued.
+        assert len(get_sum_calls) == 6
 
     async def test_failed_day_does_not_abort_remaining_days(
         self, coordinator, fake_electricity, fake_gas
@@ -767,10 +771,11 @@ class TestAsyncRetryRecentDays:
 
         assert len(get_sum_calls) == 6  # one per stat, only for the first day
 
-    async def test_failed_day_resets_seed_for_next_day(self, coordinator):
+    async def test_failed_day_keeps_seed_for_next_day(self, coordinator):
         """
-        A day that raises an exception must reset the seed so the following
-        day re-queries the DB rather than inheriting a potentially wrong sum.
+        A day that raises an exception must keep the existing seed_sums so the
+        following day continues from the last-successful sum without re-querying
+        the DB (treating the failed day as zero consumption).
         """
         get_sum_calls = []
 
@@ -790,8 +795,9 @@ class TestAsyncRetryRecentDays:
         with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
-        # day-3: seed=None → 6 queries; day-2 fails → reset; day-1: seed=None → 6 queries
-        assert len(get_sum_calls) == 12
+        # day-3: seed=None → 6 DB queries; day-2 fails → seed kept; day-1: seed
+        # is chained from day-3 → no extra DB queries.  Total: 6.
+        assert len(get_sum_calls) == 6
 
 
 # ── async_reimport_statistics ─────────────────────────────────────────────────

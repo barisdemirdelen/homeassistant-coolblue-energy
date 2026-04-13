@@ -194,7 +194,7 @@ def patch_get_instance(mock_hass):
     from unittest.mock import patch
 
     with patch(
-        "custom_components.coolblue_energy.recorder.get_instance",
+        "custom_components.coolblue_energy.ha_external_statistics.recorder.get_instance",
         return_value=mock_hass._mock_recorder,
     ):
         yield
@@ -209,7 +209,10 @@ def coordinator(mock_hass, mock_api_client):
     from unittest.mock import MagicMock
 
     from custom_components.coolblue_energy.const import BACKFILL_DAYS, RETRY_DAYS
-    from custom_components.coolblue_energy.coordinator import CoolblueCoordinator, CoordinatorData
+    from custom_components.coolblue_energy.coordinator import (
+        CoolblueCoordinator,
+        CoordinatorData,
+    )
 
     coord = object.__new__(CoolblueCoordinator)
     coord.hass = mock_hass

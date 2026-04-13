@@ -24,10 +24,10 @@ from .const import (
     RETRY_DAYS,
     SCAN_INTERVAL,
 )
+from .ha_external_statistics.recorder import async_inject_day
+from .ha_external_statistics.statistics_mixin import StatisticsLoopMixin
 from .model import GetMeterReadingsRequest, MeterReadingEntry
-from .recorder import async_inject_day
 from .statistics import (
-
     ELECTRICITY_CONSUMED,
     ELECTRICITY_COST,
     ELECTRICITY_RETURNED,
@@ -36,7 +36,6 @@ from .statistics import (
     GAS_COST,
     _day_start_utc,
 )
-from .statistics_mixin import StatisticsLoopMixin
 
 _LOGGER = logging.getLogger(__name__)
 

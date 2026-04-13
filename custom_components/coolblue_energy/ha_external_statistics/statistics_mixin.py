@@ -96,8 +96,10 @@ class StatisticsLoopMixin(ABC):
         Iterate *days* (oldest first), calling ``_process_day`` for each.
 
         Seed sums are chained across consecutive successful days.  When
-        ``_process_day`` returns ``None`` (empty day) or raises, the seed is
-        reset so the next day re-queries the DB for a safe baseline.
+        ``_process_day`` returns ``None`` (empty day) the seed is reset so the
+        next day re-queries the DB for a safe baseline.  When ``_process_day``
+        raises, the last-successful seed is preserved — the failed day is
+        treated as zero consumption — so the cumulative sum does not spike.
 
         When *raise_if_all_fail* is ``True`` and every attempt raised an
         exception, the last exception is re-raised.
@@ -115,7 +117,11 @@ class StatisticsLoopMixin(ABC):
                 _LOGGER.warning(
                     "Failed to fetch data for %s, skipping.", day, exc_info=True
                 )
-                seed_sums = None
+                # Do NOT reset seed_sums here.  Resetting to None would cause
+                # the next day to re-query the DB with a stale baseline and
+                # produce a large negative spike in the statistics graph.
+                # Preserving the last-successful seed is equivalent to treating
+                # the failed day as having zero consumption.
                 last_exc = exc
 
         if raise_if_all_fail and not any_success and last_exc is not None:

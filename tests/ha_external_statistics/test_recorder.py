@@ -8,15 +8,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.coolblue_energy.external_statistic import ExternalStatistic
-from custom_components.coolblue_energy.recorder import (
+from custom_components.coolblue_energy.ha_external_statistics import (
+    external_statistic as _ext_stat_mod,
+)
+from custom_components.coolblue_energy.ha_external_statistics import (
+    recorder as _recorder_mod,
+)
+from custom_components.coolblue_energy.ha_external_statistics.external_statistic import (
+    ExternalStatistic,
+)
+from custom_components.coolblue_energy.ha_external_statistics.recorder import (
     async_get_last_sum,
     async_inject_day,
 )
 
-_GET_INSTANCE_PATH = "custom_components.coolblue_energy.recorder.get_instance"
-_SDP_PATH = "custom_components.coolblue_energy.recorder.statistics_during_period"
-_ADD_STAT_PATH = "custom_components.coolblue_energy.external_statistic.async_add_external_statistics"
+_GET_INSTANCE_PATH = f"{_recorder_mod.__name__}.get_instance"
+_SDP_PATH = f"{_recorder_mod.__name__}.statistics_during_period"
+_ADD_STAT_PATH = f"{_ext_stat_mod.__name__}.async_add_external_statistics"
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +66,8 @@ def _make_stat(stat_id: str = "dom:stat") -> ExternalStatistic[Entry]:
 
 
 class TestAsyncGetLastSum:
-    def _mock_hass(self, recorder_result: dict) -> MagicMock:
+    @staticmethod
+    def _mock_hass(recorder_result: dict) -> tuple[MagicMock, MagicMock]:
         hass = MagicMock()
         recorder_instance = MagicMock()
         recorder_instance.async_add_executor_job = AsyncMock(

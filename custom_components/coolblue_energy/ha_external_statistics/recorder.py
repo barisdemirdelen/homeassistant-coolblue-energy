@@ -61,7 +61,9 @@ async def async_get_last_sum(
     )
     entries = result.get(stat_id, [])
     if entries:
-        return entries[-1].get("sum") or 0.0
+        last = entries[-1]
+        raw_sum = last.get("sum") if isinstance(last, dict) else getattr(last, "sum", None)
+        return float(raw_sum or 0.0)
     return 0.0
 
 

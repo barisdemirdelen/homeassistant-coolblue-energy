@@ -36,7 +36,7 @@ from .const import (
 from .const import (
     STAT_GAS_COST as _ID_GAS_COST,
 )
-from .external_statistic import ExternalStatistic
+from .ha_external_statistics.external_statistic import ExternalStatistic
 from .model import MeterReadingEntry
 
 # Dutch local timezone — all hour labels from the API are in this zone.
