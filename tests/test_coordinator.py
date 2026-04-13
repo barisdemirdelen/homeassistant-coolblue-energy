@@ -3,7 +3,6 @@ test_coordinator.py
 
 Tests for:
   - _day_start_utc / _entry_to_utc   (timezone helpers)
-  - CoolblueCoordinator._get_sum_before
   - CoolblueCoordinator._inject_statistics
   - CoolblueCoordinator._async_backfill
   - CoolblueCoordinator._async_update_data
@@ -30,16 +29,20 @@ from custom_components.coolblue_energy.const import (
 )
 from custom_components.coolblue_energy.coordinator import (
     CoordinatorData,
+)
+from custom_components.coolblue_energy.ha_external_statistics.recorder import (
+    async_get_last_sum,
+)
+from custom_components.coolblue_energy.statistics import (
     _day_start_utc,
     _entry_to_utc,
 )
 
 from .conftest import make_day_electricity, make_day_gas
 
-_STATS_PATH = "custom_components.coolblue_energy.coordinator.statistics_during_period"
-_ADD_PATH = (
-    "custom_components.coolblue_energy.coordinator.async_add_external_statistics"
-)
+_STATS_PATH = "custom_components.coolblue_energy.ha_external_statistics.recorder.statistics_during_period"
+_GET_SUM_PATH = "custom_components.coolblue_energy.ha_external_statistics.recorder.async_get_last_sum"
+_ADD_PATH = "custom_components.coolblue_energy.ha_external_statistics.external_statistic.async_add_external_statistics"
 
 _ALL_STATS = (
     STAT_ELECTRICITY_CONSUMED,
@@ -129,8 +132,8 @@ class TestGetSumBefore:
     async def test_returns_zero_when_no_data(self, coordinator):
         before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=timezone.utc)
         with patch(_STATS_PATH, return_value={}):
-            result = await coordinator._get_sum_before(
-                STAT_ELECTRICITY_CONSUMED, before_dt
+            result = await async_get_last_sum(
+                coordinator.hass, STAT_ELECTRICITY_CONSUMED, before_dt
             )
         assert result == 0.0
 
@@ -143,8 +146,8 @@ class TestGetSumBefore:
             ]
         }
         with patch(_STATS_PATH, return_value=fake):
-            result = await coordinator._get_sum_before(
-                STAT_ELECTRICITY_CONSUMED, before_dt
+            result = await async_get_last_sum(
+                coordinator.hass, STAT_ELECTRICITY_CONSUMED, before_dt
             )
         assert result == pytest.approx(101.5)
 
@@ -154,8 +157,8 @@ class TestGetSumBefore:
         with patch(
             _STATS_PATH, return_value={STAT_ELECTRICITY_CONSUMED: [{"sum": None}]}
         ):
-            result = await coordinator._get_sum_before(
-                STAT_ELECTRICITY_CONSUMED, before_dt
+            result = await async_get_last_sum(
+                coordinator.hass, STAT_ELECTRICITY_CONSUMED, before_dt
             )
         assert result == 0.0
 
@@ -170,7 +173,9 @@ class TestGetSumBefore:
             return {}
 
         with patch(_STATS_PATH, side_effect=capture):
-            await coordinator._get_sum_before(STAT_ELECTRICITY_CONSUMED, before_dt)
+            await async_get_last_sum(
+                coordinator.hass, STAT_ELECTRICITY_CONSUMED, before_dt
+            )
 
         assert captured["start"] == expected_start
 
@@ -193,14 +198,20 @@ class TestInjectStatistics:
         }
         with patch(_ADD_PATH):
             result = await coordinator._inject_statistics(
-                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=seed
+                fake_electricity,
+                fake_gas,
+                fake_costs,
+                date(2026, 1, 14),
+                seed_sums=seed,
             )
 
         assert result[STAT_ELECTRICITY_CONSUMED] == pytest.approx(1024.0)  # +24×1.0
         assert result[STAT_ELECTRICITY_RETURNED] == pytest.approx(204.8)  # +24×0.2
         assert result[STAT_GAS_CONSUMED] == pytest.approx(51.2)  # +24×0.05
         assert result[STAT_ELECTRICITY_COST] == pytest.approx(106.0)  # +24×0.25
-        assert result[STAT_ELECTRICITY_RETURNED_COMPENSATION] == pytest.approx(10.0)  # +24×0.0 (production=0.0)
+        assert result[STAT_ELECTRICITY_RETURNED_COMPENSATION] == pytest.approx(
+            10.0
+        )  # +24×0.0 (production=0.0)
         assert result[STAT_GAS_COST] == pytest.approx(22.4)  # +24×0.10
 
     async def test_queries_db_when_seed_is_none(
@@ -208,12 +219,18 @@ class TestInjectStatistics:
     ):
         """seed_sums=None must trigger a _get_sum_before call for each stat."""
         queried = []
-        coordinator._get_sum_before = AsyncMock(
-            side_effect=lambda stat_id, _dt: queried.append(stat_id) or 0.0
-        )
-        with patch(_ADD_PATH):
+
+        async def spy(hass, stat_id, dt, **kwargs):
+            queried.append(stat_id)
+            return 0.0
+
+        with patch(_GET_SUM_PATH, side_effect=spy), patch(_ADD_PATH):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=None
+                fake_electricity,
+                fake_gas,
+                fake_costs,
+                date(2026, 1, 14),
+                seed_sums=None,
             )
 
         assert set(queried) == set(_ALL_STATS)
@@ -222,13 +239,16 @@ class TestInjectStatistics:
         self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
         """When a valid seed_sums dict is provided, the DB must not be queried."""
-        coordinator._get_sum_before = AsyncMock(return_value=0.0)
-        with patch(_ADD_PATH):
+        with patch(_GET_SUM_PATH) as mock_get_sum, patch(_ADD_PATH):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity,
+                fake_gas,
+                fake_costs,
+                date(2026, 1, 14),
+                seed_sums=_EMPTY_SEED,
             )
 
-        coordinator._get_sum_before.assert_not_called()
+        mock_get_sum.assert_not_called()
 
     async def test_statistic_data_timestamps_are_utc(
         self, coordinator, fake_electricity, fake_gas, fake_costs
@@ -242,7 +262,11 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity,
+                fake_gas,
+                fake_costs,
+                date(2026, 1, 14),
+                seed_sums=_EMPTY_SEED,
             )
 
         assert captured["first_start"] == datetime(
@@ -261,7 +285,11 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity,
+                fake_gas,
+                fake_costs,
+                date(2026, 1, 14),
+                seed_sums=_EMPTY_SEED,
             )
 
         assert captured_elec[0]["state"] == pytest.approx(1.0)  # hour 0 delta
@@ -270,7 +298,9 @@ class TestInjectStatistics:
         assert captured_elec[1]["sum"] == pytest.approx(2.0)
         assert captured_elec[23]["sum"] == pytest.approx(24.0)  # full day
 
-    async def test_seed_carried_into_sum(self, coordinator, fake_electricity, fake_gas, fake_costs):
+    async def test_seed_carried_into_sum(
+        self, coordinator, fake_electricity, fake_gas, fake_costs
+    ):
         """A non-zero seed must offset all sums in the day's StatisticData."""
         seed = {**_EMPTY_SEED, STAT_ELECTRICITY_CONSUMED: 500.0}
         captured_sums = []
@@ -281,7 +311,11 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=seed
+                fake_electricity,
+                fake_gas,
+                fake_costs,
+                date(2026, 1, 14),
+                seed_sums=seed,
             )
 
         assert captured_sums[0] == pytest.approx(501.0)  # 500 + 1 kWh
@@ -297,7 +331,11 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, fake_costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity,
+                fake_gas,
+                fake_costs,
+                date(2026, 1, 14),
+                seed_sums=_EMPTY_SEED,
             )
 
         assert set(called_ids) == set(_ALL_STATS)
@@ -325,9 +363,12 @@ class TestInjectStatistics:
 
         assert captured["first_state"] == pytest.approx(0.05)
 
-    async def test_electricity_cost_excludes_production(self, coordinator, fake_electricity, fake_gas):
+    async def test_electricity_cost_excludes_production(
+        self, coordinator, fake_electricity, fake_gas
+    ):
         """STAT_ELECTRICITY_COST must only track electricity.total, not production credit."""
         from .conftest import make_day_costs
+
         costs = make_day_costs(electricity_cost=0.30, production=-0.08)
         captured = {}
 
@@ -337,15 +378,22 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity,
+                fake_gas,
+                costs,
+                date(2026, 1, 14),
+                seed_sums=_EMPTY_SEED,
             )
 
         # Must be 0.30 only, NOT 0.30 + (-0.08) = 0.22
         assert captured["first_state"] == pytest.approx(0.30)
 
-    async def test_electricity_returned_compensation_stat(self, coordinator, fake_electricity, fake_gas):
+    async def test_electricity_returned_compensation_stat(
+        self, coordinator, fake_electricity, fake_gas
+    ):
         """STAT_ELECTRICITY_RETURNED_COMPENSATION must track -production per entry."""
         from .conftest import make_day_costs
+
         costs = make_day_costs(electricity_cost=0.25, production=-0.05)
         captured = {}
 
@@ -356,7 +404,11 @@ class TestInjectStatistics:
 
         with patch(_ADD_PATH, side_effect=capture):
             await coordinator._inject_statistics(
-                fake_electricity, fake_gas, costs, date(2026, 1, 14), seed_sums=_EMPTY_SEED
+                fake_electricity,
+                fake_gas,
+                costs,
+                date(2026, 1, 14),
+                seed_sums=_EMPTY_SEED,
             )
 
         # -(-0.05) = +0.05 per hour; 24 h × 0.05 = 1.20
@@ -378,13 +430,13 @@ class TestAsyncBackfill:
     async def test_returns_yesterday_coordinator_data(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """The returned CoordinatorData must contain yesterday's entries."""
+        """After backfill, coordinator._last_data must contain yesterday's entries."""
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_backfill(BACKFILL_DAYS)
+            await coordinator._async_backfill(BACKFILL_DAYS)
 
-        assert isinstance(result, CoordinatorData)
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert isinstance(coordinator._last_data, CoordinatorData)
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_seeds_are_chained_across_days(self, coordinator):
         """
@@ -393,27 +445,28 @@ class TestAsyncBackfill:
         Only the initial 3 _get_sum_before calls (one per stat) are expected.
         """
         get_sum_calls = []
-        coordinator._get_sum_before = AsyncMock(
-            side_effect=lambda stat_id, dt: get_sum_calls.append(stat_id) or 0.0
-        )
-        with patch(_ADD_PATH):
+
+        async def spy_get_sum(hass, stat_id, dt, **kwargs):
+            get_sum_calls.append(stat_id)
+            return 0.0
+
+        with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator._async_backfill(3)
 
         # 3 initial seeds, no more (seeds chained for days 2 and 3)
         assert len(get_sum_calls) == 6
 
-    async def test_failed_day_causes_db_requery_for_next(self, coordinator):
+    async def test_failed_day_keeps_seed_for_next_day(self, coordinator):
         """
-        A day that raises an exception must reset seed_sums to None so the
-        following day re-seeds from the DB (3 extra _get_sum_before calls).
+        A day that raises an exception must keep the existing seed_sums so the
+        following day continues from the last-successful sum without re-querying
+        the DB (treating the failed day as zero consumption).
         """
         get_sum_calls = []
 
-        async def spy_get_sum(stat_id, dt):
+        async def spy_get_sum(hass, stat_id, dt, **kwargs):
             get_sum_calls.append(stat_id)
             return 0.0
-
-        coordinator._get_sum_before = spy_get_sum
 
         # Fail the 5th day from today (offset=5 in a 7-day backfill)
         original_fetch = coordinator._fetch_day
@@ -425,11 +478,12 @@ class TestAsyncBackfill:
 
         coordinator._fetch_day = patched_fetch
 
-        with patch(_ADD_PATH):
+        with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator._async_backfill(7)
 
-        # 6 initial + 6 after the failure = at least 12
-        assert len(get_sum_calls) >= 12
+        # Only the initial 6 DB queries (seed for the first day); the failed day
+        # keeps the existing seed so no extra DB queries are issued.
+        assert len(get_sum_calls) == 6
 
     async def test_failed_day_does_not_abort_remaining_days(
         self, coordinator, fake_electricity, fake_gas
@@ -460,31 +514,29 @@ class TestAsyncUpdateData:
     async def test_first_run_triggers_backfill(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """On first call (_backfilled=False), backfill is run and flag is set."""
+        """On first call (_stats_backfilled=False), backfill is run and flag is set."""
         backfill_calls = []
 
         async def mock_backfill(days):
             backfill_calls.append(days)
-            return CoordinatorData(electricity=fake_electricity, gas=fake_gas)
 
         coordinator._async_backfill = mock_backfill
 
         result = await coordinator._async_update_data()
 
         assert len(backfill_calls) == 1
-        assert coordinator._backfilled is True
-        assert result.electricity is fake_electricity
+        assert coordinator._stats_backfilled is True
+        assert isinstance(result, CoordinatorData)
 
     async def test_subsequent_run_skips_backfill(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """With _backfilled=True, backfill must NOT run again."""
-        coordinator._backfilled = True
+        """With _stats_backfilled=True, backfill must NOT run again."""
+        coordinator._stats_backfilled = True
         backfill_calls = []
 
         async def mock_backfill(days):
             backfill_calls.append(days)
-            return CoordinatorData(electricity=[], gas=[])
 
         coordinator._async_backfill = mock_backfill
 
@@ -498,9 +550,9 @@ class TestAsyncUpdateData:
         """Any unhandled exception from the API must be re-raised as UpdateFailed."""
         from homeassistant.helpers.update_coordinator import UpdateFailed
 
-        # Use the normal daily-refresh path (_backfilled=True) so the error
+        # Use the normal daily-refresh path (_stats_backfilled=True) so the error
         # propagates directly; the backfill path swallows per-day errors.
-        coordinator._backfilled = True
+        coordinator._stats_backfilled = True
         coordinator._client.get_hourly_energy.side_effect = RuntimeError("API down")
 
         with pytest.raises(UpdateFailed, match="API down"):
@@ -534,22 +586,22 @@ class TestAsyncRetryRecentDays:
     async def test_returns_yesterday_data_when_all_available(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """When all days have data, CoordinatorData must reflect yesterday's entries."""
+        """When all days have data, coordinator._last_data must reflect yesterday's entries."""
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     # ── empty-day handling ────────────────────────────────────────────────────
 
     async def test_skips_injection_for_empty_day(self, coordinator):
-        """A day that returns ([], []) must not trigger async_add_external_statistics."""
+        """A day that returns ([], [], []) must not trigger async_add_external_statistics."""
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
@@ -565,7 +617,7 @@ class TestAsyncRetryRecentDays:
         async def patched_fetch(day):
             fetch_count[0] += 1
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
@@ -582,7 +634,7 @@ class TestAsyncRetryRecentDays:
         """
         get_sum_calls = []
 
-        async def spy_get_sum(stat_id, dt):
+        async def spy_get_sum(hass, stat_id, dt, **kwargs):
             get_sum_calls.append(stat_id)
             return 0.0
 
@@ -592,12 +644,12 @@ class TestAsyncRetryRecentDays:
 
         async def patched_fetch(day):
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
 
-        with patch(_ADD_PATH):
+        with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
         # day-3 has no prior seed → 6 DB queries
@@ -608,34 +660,34 @@ class TestAsyncRetryRecentDays:
     async def test_returns_most_recent_day_with_data_when_yesterday_empty(
         self, coordinator, fake_electricity, fake_gas
     ):
-        """If yesterday returns empty, CoordinatorData must come from a prior day."""
+        """If yesterday returns empty, coordinator._last_data must come from a prior day."""
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
             if (date.today() - day).days == 1:  # yesterday
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
         # yesterday was empty; last_data comes from the most-recent earlier day
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_returns_empty_coordinator_data_when_all_days_empty(
         self, coordinator
     ):
-        """If every day returns ([], []), return CoordinatorData([], [])."""
+        """If every day returns ([], [], []), coordinator._last_data stays empty."""
         coordinator._fetch_day = AsyncMock(return_value=([], [], []))
 
         with patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert result.electricity == []
-        assert result.gas == []
+        assert coordinator._last_data.electricity == []
+        assert coordinator._last_data.gas == []
 
     # ── exception handling ────────────────────────────────────────────────────
 
@@ -653,10 +705,10 @@ class TestAsyncRetryRecentDays:
         coordinator._fetch_day = patched_fetch
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert result.electricity == fake_electricity
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_failed_day_does_not_abort_remaining_days(self, coordinator):
         """An exception on one day must not stop processing of subsequent days."""
@@ -696,9 +748,9 @@ class TestAsyncRetryRecentDays:
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             # Must not raise
-            result = await coordinator._async_retry_recent_days(3)
+            await coordinator._async_retry_recent_days(3)
 
-        assert isinstance(result, CoordinatorData)
+        assert isinstance(coordinator._last_data, CoordinatorData)
 
     # ── seed-sum chaining ─────────────────────────────────────────────────────
 
@@ -710,29 +762,26 @@ class TestAsyncRetryRecentDays:
         """
         get_sum_calls = []
 
-        async def spy_get_sum(stat_id, dt):
+        async def spy_get_sum(hass, stat_id, dt, **kwargs):
             get_sum_calls.append(stat_id)
             return 0.0
 
-        coordinator._get_sum_before = spy_get_sum
-
-        with patch(_ADD_PATH):
+        with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
         assert len(get_sum_calls) == 6  # one per stat, only for the first day
 
-    async def test_failed_day_resets_seed_for_next_day(self, coordinator):
+    async def test_failed_day_keeps_seed_for_next_day(self, coordinator):
         """
-        A day that raises an exception must reset the seed so the following
-        day re-queries the DB rather than inheriting a potentially wrong sum.
+        A day that raises an exception must keep the existing seed_sums so the
+        following day continues from the last-successful sum without re-querying
+        the DB (treating the failed day as zero consumption).
         """
         get_sum_calls = []
 
-        async def spy_get_sum(stat_id, dt):
+        async def spy_get_sum(hass, stat_id, dt, **kwargs):
             get_sum_calls.append(stat_id)
             return 0.0
-
-        coordinator._get_sum_before = spy_get_sum
 
         original_fetch = coordinator._fetch_day
 
@@ -743,11 +792,12 @@ class TestAsyncRetryRecentDays:
 
         coordinator._fetch_day = patched_fetch
 
-        with patch(_ADD_PATH):
+        with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator._async_retry_recent_days(3)
 
-        # day-3: seed=None → 6 queries; day-2 fails → reset; day-1: seed=None → 6 queries
-        assert len(get_sum_calls) == 12
+        # day-3: seed=None → 6 DB queries; day-2 fails → seed kept; day-1: seed
+        # is chained from day-3 → no extra DB queries.  Total: 6.
+        assert len(get_sum_calls) == 6
 
 
 # ── async_reimport_statistics ─────────────────────────────────────────────────
@@ -833,13 +883,11 @@ class TestAsyncReimportStatistics:
         start = date.today() - timedelta(days=3)
         queried_dts = []
 
-        async def spy_get_sum(stat_id, dt):
+        async def spy_get_sum(hass, stat_id, dt, **kwargs):
             queried_dts.append(dt)
             return 0.0
 
-        coordinator._get_sum_before = spy_get_sum
-
-        with patch(_ADD_PATH):
+        with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
 
         expected_dt = _day_start_utc(start)
@@ -850,13 +898,11 @@ class TestAsyncReimportStatistics:
         start = date.today() - timedelta(days=4)
         get_sum_calls = []
 
-        async def spy_get_sum(stat_id, dt):
+        async def spy_get_sum(hass, stat_id, dt, **kwargs):
             get_sum_calls.append(stat_id)
             return 0.0
 
-        coordinator._get_sum_before = spy_get_sum
-
-        with patch(_ADD_PATH):
+        with patch(_GET_SUM_PATH, side_effect=spy_get_sum), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
 
         assert len(get_sum_calls) == 6
@@ -870,7 +916,7 @@ class TestAsyncReimportStatistics:
 
         async def patched_fetch(day):
             if (date.today() - day).days == 2:
-                return [], []
+                return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
@@ -900,7 +946,9 @@ class TestAsyncReimportStatistics:
 
         assert fetch_count[0] == 3
 
-    async def test_async_set_updated_data_called_even_after_partial_failure(self, coordinator):
+    async def test_async_set_updated_data_called_even_after_partial_failure(
+        self, coordinator
+    ):
         """async_set_updated_data must always be called at the end, even after failures."""
         start = date.today() - timedelta(days=2)
         coordinator._client.get_hourly_energy.side_effect = RuntimeError("down")
@@ -992,7 +1040,9 @@ class TestFetchDay:
         )
         assert electricity == fake_electricity
         assert gas == []
-        assert call_count[0] == 3  # all three fetches were attempted (elec + gas + costs)
+        assert (
+            call_count[0] == 3
+        )  # all three fetches were attempted (elec + gas + costs)
 
 
 # ── Partial-contract integration tests ────────────────────────────────────────
@@ -1073,10 +1123,10 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(1)
+            await coordinator._async_retry_recent_days(1)
 
-        assert result.electricity == fake_electricity
-        assert result.gas == []
+        assert coordinator._last_data.electricity == fake_electricity
+        assert coordinator._last_data.gas == []
 
     async def test_electricity_only_day_is_not_skipped_as_empty(
         self, coordinator, fake_electricity
@@ -1138,10 +1188,10 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_retry_recent_days(1)
+            await coordinator._async_retry_recent_days(1)
 
-        assert result.electricity == []
-        assert result.gas == fake_gas
+        assert coordinator._last_data.electricity == []
+        assert coordinator._last_data.gas == fake_gas
 
     async def test_gas_only_day_is_not_skipped_as_empty(self, coordinator, fake_gas):
         """A day with only gas data must NOT be skipped ('no data' guard)."""
@@ -1163,10 +1213,10 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_backfill(3)
+            await coordinator._async_backfill(3)
 
-        assert isinstance(result, CoordinatorData)
-        assert result.electricity == fake_electricity
+        assert isinstance(coordinator._last_data, CoordinatorData)
+        assert coordinator._last_data.electricity == fake_electricity
 
     async def test_gas_only_backfill_works(self, coordinator, fake_gas):
         """Backfill for a gas-only contract must complete without error."""
@@ -1175,7 +1225,7 @@ class TestPartialContracts:
         )
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
-            result = await coordinator._async_backfill(3)
+            await coordinator._async_backfill(3)
 
-        assert isinstance(result, CoordinatorData)
-        assert result.gas == fake_gas
+        assert isinstance(coordinator._last_data, CoordinatorData)
+        assert coordinator._last_data.gas == fake_gas

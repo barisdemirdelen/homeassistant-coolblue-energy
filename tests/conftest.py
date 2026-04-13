@@ -180,7 +180,7 @@ def mock_hass() -> MagicMock:
     hass.async_add_executor_job = executor_job
 
     # get_instance(hass) must return a recorder-like object with the same
-    # executor so coordinator._get_sum_before works in tests.
+    # executor so async_get_last_sum works in tests.
     mock_recorder = MagicMock()
     mock_recorder.async_add_executor_job = executor_job
     hass._mock_recorder = mock_recorder  # keep a reference for patching
@@ -194,7 +194,7 @@ def patch_get_instance(mock_hass):
     from unittest.mock import patch
 
     with patch(
-        "custom_components.coolblue_energy.coordinator.get_instance",
+        "custom_components.coolblue_energy.ha_external_statistics.recorder.get_instance",
         return_value=mock_hass._mock_recorder,
     ):
         yield
@@ -206,15 +206,23 @@ def coordinator(mock_hass, mock_api_client):
     CoolblueCoordinator with the HA DataUpdateCoordinator infrastructure
     bypassed via ``object.__new__``.
     """
-    from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
     from unittest.mock import MagicMock
+
+    from custom_components.coolblue_energy.const import BACKFILL_DAYS, RETRY_DAYS
+    from custom_components.coolblue_energy.coordinator import (
+        CoolblueCoordinator,
+        CoordinatorData,
+    )
 
     coord = object.__new__(CoolblueCoordinator)
     coord.hass = mock_hass
     coord._client = mock_api_client
     coord._debtor_id = "00844083"
     coord._location_id = "3addb383-a979-40b4-8487-0f3bc0854da5"
-    coord._backfilled = False
+    coord._backfill_days = BACKFILL_DAYS
+    coord._retry_days = RETRY_DAYS
+    coord._stats_backfilled = False
+    coord._last_data = CoordinatorData(electricity=[], gas=[])
     # HA DataUpdateCoordinator methods not available without full __init__
     coord.async_set_updated_data = MagicMock()
     return coord

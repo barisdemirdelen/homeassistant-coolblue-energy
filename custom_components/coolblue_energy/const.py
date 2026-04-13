@@ -5,7 +5,7 @@ from homeassistant.const import CURRENCY_EURO, UnitOfEnergy, UnitOfVolume
 DOMAIN = "coolblue_energy"
 DEFAULT_NAME = "Coolblue Energy"
 
-PLATFORMS = ["sensor"]
+PLATFORMS: list[str] = []
 SCAN_INTERVAL = timedelta(hours=6)
 BACKFILL_DAYS = 7
 # How many recent days to re-check on every normal refresh.
