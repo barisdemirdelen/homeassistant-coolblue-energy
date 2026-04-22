@@ -111,6 +111,10 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
             return None
 
         self._last_data = CoordinatorData(electricity=electricity, gas=gas, costs=costs)
+        _LOGGER.debug(
+            "Fetched %s: %d electricity, %d gas, %d cost entries.",
+            day, len(electricity), len(gas), len(costs),
+        )
         return await self._inject_statistics(electricity, gas, costs, day, seed_sums)
 
     # ── Private helpers ───────────────────────────────────────────────────────

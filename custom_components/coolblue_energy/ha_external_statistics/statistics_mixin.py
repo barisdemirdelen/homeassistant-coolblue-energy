@@ -75,10 +75,14 @@ class StatisticsLoopMixin(ABC):
         """
         try:
             if not self._stats_backfilled:
+                _LOGGER.debug("Starting initial backfill of the last %d days.", self._backfill_days)
                 await self._async_backfill(self._backfill_days)
                 self._stats_backfilled = True
+                _LOGGER.debug("Initial backfill complete.")
             else:
+                _LOGGER.debug("Running scheduled statistics update (retrying last %d days).", self._retry_days)
                 await self._async_retry_recent_days(self._retry_days)
+                _LOGGER.debug("Scheduled statistics update complete.")
         except UpdateFailed:
             raise
         except Exception as err:
@@ -110,8 +114,10 @@ class StatisticsLoopMixin(ABC):
 
         for day in days:
             try:
+                _LOGGER.debug("Processing day %s.", day)
                 seed_sums = await self._process_day(day, seed_sums)
                 any_success = True
+                _LOGGER.debug("Day %s processed successfully.", day)
                 # None return → empty day; seed stays None → next day hits DB.
             except Exception as exc:
                 _LOGGER.warning(
