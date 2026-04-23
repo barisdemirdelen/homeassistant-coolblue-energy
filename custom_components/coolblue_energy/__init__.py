@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 
 from .api_client import ApiClient
 from .const import (
@@ -19,6 +20,7 @@ from .const import (
     CONF_LOCATION_ID,
     DOMAIN,
     PLATFORMS,
+    SCAN_INTERVAL,
     SERVICE_REIMPORT_STATISTICS,
 )
 from .coordinator import CoolblueCoordinator
@@ -45,9 +47,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await coordinator.async_config_entry_first_refresh()
 
+    async def _scheduled_refresh(_now=None) -> None:
+        await coordinator.async_refresh()
+
+    cancel_interval = async_track_time_interval(hass, _scheduled_refresh, SCAN_INTERVAL)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
         "client": client,
+        "cancel_interval": cancel_interval,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -83,6 +91,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         data = hass.data[DOMAIN].pop(entry.entry_id)
+        data["cancel_interval"]()
         await data["client"].close()
         # Remove the service when the last config entry is unloaded.
         if not hass.data.get(DOMAIN):

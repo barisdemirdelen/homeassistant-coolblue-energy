@@ -22,7 +22,6 @@ from .const import (
     BACKFILL_DAYS,
     DOMAIN,
     RETRY_DAYS,
-    SCAN_INTERVAL,
 )
 from .ha_external_statistics.recorder import async_inject_day
 from .ha_external_statistics.statistics_mixin import StatisticsLoopMixin
@@ -75,7 +74,6 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=SCAN_INTERVAL,
             backfill_days=BACKFILL_DAYS,
             retry_days=RETRY_DAYS,
         )
