@@ -11,7 +11,6 @@ from custom_components.coolblue_energy.model import (
     HourlyCosts,
     MeterReadingEntry,
     PeakUsage,
-    SmartDeviceUsage,
 )
 
 # ── Factory helpers ───────────────────────────────────────────────────────────
@@ -30,16 +29,9 @@ def make_electricity_entry(
         electricity=PeakUsage(total=electricity, off_peak=0.6, peak=0.4),
         production=PeakUsage(total=production, off_peak=production, peak=0.0),
         costs=HourlyCosts(
-            electricity=CostComponent(
-                total=electricity_cost,
-                fixed=0.01,
-                consumption=round(electricity_cost - 0.01, 6),
-            ),
-            gas=CostComponent(total=0.10, fixed=0.01, consumption=0.09),
+            electricity=CostComponent(total=electricity_cost),
+            gas=CostComponent(total=0.10),
             production=-0.05,
-        ),
-        smart_device_usage=SmartDeviceUsage(
-            free=0.0, paid=0.0, has_free_drying=False, has_free_washing=False
         ),
         price=price,
         gas=0.0,
@@ -53,12 +45,9 @@ def make_gas_entry(hour: int, gas: float = 0.05) -> MeterReadingEntry:
         electricity=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
         production=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
         costs=HourlyCosts(
-            electricity=CostComponent(total=0.0, fixed=0.0, consumption=0.0),
-            gas=CostComponent(total=0.10, fixed=0.01, consumption=0.09),
+            electricity=CostComponent(total=0.0),
+            gas=CostComponent(total=0.0),  # gas costs come from "costs" API call
             production=0.0,
-        ),
-        smart_device_usage=SmartDeviceUsage(
-            free=0.0, paid=0.0, has_free_drying=False, has_free_washing=False
         ),
         price=0.0,
         gas=gas,
@@ -81,20 +70,9 @@ def make_cost_entry(
         electricity=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
         production=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
         costs=HourlyCosts(
-            electricity=CostComponent(
-                total=electricity_cost,
-                fixed=-0.01,
-                consumption=round(electricity_cost + 0.01, 6),
-            ),
-            gas=CostComponent(
-                total=gas_cost,
-                fixed=0.04,
-                consumption=round(gas_cost - 0.04, 6),
-            ),
+            electricity=CostComponent(total=electricity_cost),
+            gas=CostComponent(total=gas_cost),
             production=production,
-        ),
-        smart_device_usage=SmartDeviceUsage(
-            free=0.0, paid=0.0, has_free_drying=False, has_free_washing=False
         ),
         price=0.0,
         gas=0.0,

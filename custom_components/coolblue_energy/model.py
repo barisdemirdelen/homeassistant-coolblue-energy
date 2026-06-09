@@ -10,8 +10,10 @@ Response → list[MeterReadingEntry]
 
 The API returns three distinct response shapes depending on ``energy_type``:
 
-* ``"electricity"`` — electricity usage filled in; gas usage = 0; costs = 0.
-* ``"gas"``         — gas usage filled in; electricity usage = 0; costs = 0.
+* ``"electricity"`` — electricity usage filled in; gas usage = 0; costs may
+                      be populated or zero depending on the account/timing.
+* ``"gas"``         — gas usage filled in; electricity usage = 0; costs are
+                      typically zero (use a dedicated ``"costs"`` call).
 * ``"costs"``       — usage = 0 for both; cost fields are populated.
 
 Callers therefore make three separate requests and keep the results in separate
@@ -90,28 +92,40 @@ class GetMeterReadingsRequest(CamelCaseModel):
 
 
 class PeakUsage(CamelCaseModel):
-    """kWh split across peak / off-peak tariff bands (or production totals)."""
+    """kWh split across peak / off-peak / single tariff bands."""
 
-    peak: CoercedFloat
-    off_peak: CoercedFloat  # API field name: "offPeak"
-    total: CoercedFloat
+    peak: CoercedFloat = 0.0
+    off_peak: CoercedFloat = 0.0   # API field name: "offPeak"
+    single: CoercedFloat = 0.0    # single-tariff meter value
+    total: CoercedFloat = 0.0
+
+
+class SmartDeviceItemUsage(BaseModel):
+    """Usage breakdown for one smart-device appliance type."""
+
+    free: CoercedFloat = 0.0
+    non_free: CoercedFloat = 0.0   # API field name: "nonFree"
+    total: CoercedFloat = 0.0
+
+
+class SmartDeviceItem(BaseModel):
+    """One smart-device appliance's hourly usage."""
+
+    usage: SmartDeviceItemUsage = Field(default_factory=SmartDeviceItemUsage)
 
 
 class SmartDeviceUsage(BaseModel):
-    """Smart-device (washing machine / dryer) usage metadata."""
+    """Aggregated smart-device (washing machine / dryer) usage for one hour."""
 
-    free: CoercedFloat = 0.0
-    paid: CoercedFloat = 0.0
-    has_free_drying: bool = False
-    has_free_washing: bool = False
+    washing: SmartDeviceItem = Field(default_factory=SmartDeviceItem)
+    drying: SmartDeviceItem = Field(default_factory=SmartDeviceItem)
+    cost: CoercedFloat = 0.0
 
 
 class CostComponent(BaseModel):
-    """A cost amount with an optional fixed / variable breakdown (EUR)."""
+    """A cost amount in EUR for one hour."""
 
-    total: CoercedFloat
-    fixed: CoercedFloat = 0.0
-    consumption: CoercedFloat = 0.0
+    total: CoercedFloat = 0.0
 
 
 class HourlyCosts(BaseModel):
@@ -119,8 +133,8 @@ class HourlyCosts(BaseModel):
     the solar feed-in credit (stored as a negative number, matching the API
     ``feedIn.cost.amount`` sign convention)."""
 
-    electricity: CostComponent = Field(default_factory=lambda: CostComponent(total=0.0))
-    gas: CostComponent = Field(default_factory=lambda: CostComponent(total=0.0))
+    electricity: CostComponent = Field(default_factory=CostComponent)
+    gas: CostComponent = Field(default_factory=CostComponent)
     production: CoercedFloat = 0.0  # negative → feed-in credit
 
 
@@ -149,10 +163,10 @@ class MeterReadingEntry(BaseModel):
     name: str
     """Amsterdam-local hour label, e.g. ``"14:00"``."""
 
-    electricity: PeakUsage
+    electricity: PeakUsage = Field(default_factory=PeakUsage)
     """kWh consumed from the grid (non-zero in electricity-type responses)."""
 
-    production: PeakUsage
+    production: PeakUsage = Field(default_factory=PeakUsage)
     """kWh fed back to the grid, stored **negated** (non-zero in electricity
     responses that have solar activity)."""
 
@@ -197,7 +211,7 @@ class MeterReadingEntry(BaseModel):
         elec_usage = elec.get("usage") or {}
         elec_cost_amount = (elec.get("cost") or {}).get("amount", 0)
 
-        # ── Gas usage (scalar, not a nested dict) ─────────────────────────
+        # ── Gas usage ─────────────────────────────────────────────────────
         gas_raw = data.get("gas") or {}
         gas_usage = gas_raw.get("usage", 0)
         if isinstance(gas_usage, dict):
@@ -212,23 +226,45 @@ class MeterReadingEntry(BaseModel):
             # gives the positive kWh-returned figure.
             prod_peak     = -(prod_raw.get("peak", 0) or 0)
             prod_off_peak = -(prod_raw.get("offPeak", 0) or 0)
+            prod_single   = -(prod_raw.get("single", 0) or 0)
             prod_total    = -(prod_raw.get("total", 0) or 0)
             # feedIn.cost.amount is already negative (cost credit) — keep sign.
             prod_cost = (feed_in.get("cost") or {}).get("amount", 0)
         else:
-            prod_peak = prod_off_peak = prod_total = 0.0
+            prod_peak = prod_off_peak = prod_single = prod_total = 0.0
             prod_cost = 0.0
+
+        # ── Smart devices ─────────────────────────────────────────────────
+        smart_raw = data.get("smartDevices") or {}
+
+        def _device_usage(d: dict | None) -> dict:
+            u = (d or {}).get("usage") or {}
+            return {
+                "usage": {
+                    "free":     u.get("free", 0),
+                    "non_free": u.get("nonFree", 0),
+                    "total":    u.get("total", 0),
+                }
+            }
+
+        smart_device_usage = {
+            "washing": _device_usage(smart_raw.get("washing")),
+            "drying":  _device_usage(smart_raw.get("drying")),
+            "cost":    smart_raw.get("cost", 0),
+        }
 
         return {
             "name": name,
             "electricity": {
                 "peak":     elec_usage.get("peak", 0),
                 "off_peak": elec_usage.get("offPeak", 0),
+                "single":   elec_usage.get("single", 0),
                 "total":    elec_usage.get("total", 0),
             },
             "production": {
                 "peak":     prod_peak,
                 "off_peak": prod_off_peak,
+                "single":   prod_single,
                 "total":    prod_total,
             },
             "costs": {
@@ -236,7 +272,7 @@ class MeterReadingEntry(BaseModel):
                 "gas":         {"total": gas_cost_amount},
                 "production":  prod_cost,
             },
-            "smart_device_usage": {},
+            "smart_device_usage": smart_device_usage,
             "price":              data.get("dynamicPrice", 0),
             "gas":                gas_usage,
         }

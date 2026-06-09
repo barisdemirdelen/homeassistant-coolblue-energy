@@ -191,21 +191,21 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
         Inject statistics for one day via each ``ExternalStatistic`` instance.
 
         Electricity/production usage comes from ``electricity_entries``.
-        Gas usage and gas cost come from ``gas_entries``.
-        Electricity cost and feed-in compensation come from ``costs_entries``
-        (only when ``electricity_entries`` is non-empty, i.e. there is an
-        electricity contract).
+        Gas usage comes from ``gas_entries``.
+        Electricity cost, gas cost, and feed-in compensation all come from
+        ``costs_entries``, because the electricity/gas-type responses return
+        zero for cost fields — only the dedicated ``"costs"`` call populates
+        them.
 
         *seed_sums* provides the running total at the start of the day.
         If ``None``, each statistic queries the recorder for its seed value.
 
         Returns the updated sums at the end of the day for chaining.
         """
-        # Only inject cost statistics for the relevant contract type:
-        # - electricity costs / compensation only when electricity data exists
-        # - gas cost only when gas data exists
+        # Costs come from the dedicated "costs" API response only.
+        # The electricity/gas-type responses return zero for all cost fields.
         elec_cost_entries = costs_entries if electricity_entries else []
-        gas_cost_entries = gas_entries  # gas cost is embedded in gas responses
+        gas_cost_entries = costs_entries if gas_entries else []
 
         return await async_inject_day(
             self.hass,
