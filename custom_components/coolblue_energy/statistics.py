@@ -4,8 +4,7 @@ statistics.py
 Coolblue Energy external-statistic instances.
 
 Defines the six ``ExternalStatistic`` objects for this integration and the
-Amsterdam-timezone helpers needed to convert Coolblue API hour labels
-(``"HH:MM"``) to UTC datetimes.
+Amsterdam-timezone helpers needed to anchor the day's start in UTC.
 """
 
 from __future__ import annotations
@@ -46,6 +45,22 @@ _TZ_NL = ZoneInfo("Europe/Amsterdam")
 # ── Timezone helpers ──────────────────────────────────────────────────────────
 
 
+def _entry_to_utc(name: str, for_date: date) -> datetime:
+    """
+    Convert an Amsterdam-local ``"HH:MM"`` hour label + calendar date to a
+    timezone-aware UTC ``datetime``.
+
+    The *name* field on :class:`~model.MeterReadingEntry` stores the
+    Amsterdam local hour (e.g. ``"14:00"``).  This helper applies the
+    correct CET/CEST offset so the result can be used as the ``start``
+    of a ``StatisticData`` point.
+    """
+    h, m = int(name[:2]), int(name[3:5])
+    local_dt = datetime(for_date.year, for_date.month, for_date.day, h, m,
+                        tzinfo=_TZ_NL)
+    return local_dt.astimezone(timezone.utc)
+
+
 def _day_start_utc(day: date) -> datetime:
     """Return the UTC datetime for midnight of *day* in Amsterdam local time."""
     return datetime(day.year, day.month, day.day, 0, 0, tzinfo=_TZ_NL).astimezone(
@@ -53,17 +68,8 @@ def _day_start_utc(day: date) -> datetime:
     )
 
 
-def _entry_to_utc(entry_name: str, for_date: date) -> datetime:
-    """Convert an API hour label (``"HH:MM"``) plus a date to a UTC datetime."""
-    hour, minute = map(int, entry_name.split(":"))
-    local_dt = datetime(
-        for_date.year, for_date.month, for_date.day, hour, minute, tzinfo=_TZ_NL
-    )
-    return local_dt.astimezone(timezone.utc)
-
-
 def _ts(entry: MeterReadingEntry, for_date: date) -> datetime:
-    """``period_start_fn`` adapter: delegate to ``_entry_to_utc`` via ``entry.name``."""
+    """``period_start_fn`` adapter: convert entry.name + for_date to UTC."""
     return _entry_to_utc(entry.name, for_date)
 
 
@@ -86,6 +92,7 @@ ELECTRICITY_RETURNED: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
     unit_class="energy",
     period_start_fn=_ts,
+    # production.total is stored negated; negate again → positive kWh returned.
     value_fn=lambda e: -e.production.total,
 )
 
@@ -106,6 +113,7 @@ ELECTRICITY_COST: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_of_measurement=CURRENCY_EURO,
     unit_class=None,
     period_start_fn=_ts,
+    # Cost comes from the dedicated "costs" API response.
     value_fn=lambda e: e.costs.electricity.total,
 )
 
@@ -117,6 +125,7 @@ ELECTRICITY_RETURNED_COMPENSATION: ExternalStatistic[MeterReadingEntry] = (
         unit_of_measurement=CURRENCY_EURO,
         unit_class=None,
         period_start_fn=_ts,
+        # costs.production is negative (credit); negate → positive compensation.
         value_fn=lambda e: -e.costs.production,
     )
 )
@@ -128,6 +137,7 @@ GAS_COST: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_of_measurement=CURRENCY_EURO,
     unit_class=None,
     period_start_fn=_ts,
+    # Cost comes from gas entries (costs.gas.total is populated in gas responses).
     value_fn=lambda e: e.costs.gas.total,
 )
 

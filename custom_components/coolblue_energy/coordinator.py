@@ -3,15 +3,23 @@ coordinator.py
 
 DataUpdateCoordinator for Coolblue Energy.
 
-Fetches yesterday's hourly electricity and gas data and injects it as
-long-term external statistics into the HA recorder so the Energy Dashboard
-can display it.
+Fetches yesterday's hourly electricity, gas, and costs data and injects them
+as long-term external statistics into the HA recorder so the Energy Dashboard
+can display them.
+
+Three separate ``getInsights`` calls are made per day because the API only
+populates meaningful values in the field that matches the requested
+``energy_type``:
+
+* ``"electricity"`` → usage kWh (electricity.total, production.total)
+* ``"gas"``         → usage m³  (gas)
+* ``"costs"``       → EUR costs (costs.electricity, costs.gas, costs.production)
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 from homeassistant.core import HomeAssistant
@@ -48,7 +56,6 @@ class CoordinatorData:
 
     electricity: list[MeterReadingEntry]
     gas: list[MeterReadingEntry]
-    costs: list[MeterReadingEntry] = field(default_factory=list)
 
 
 # ── Coordinator ───────────────────────────────────────────────────────────────
@@ -102,15 +109,15 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
     ) -> dict[str, float] | None:
         """Fetch and inject one day; return None if no data yet."""
         electricity, gas, costs = await self._fetch_day(day)
-        if not electricity and not gas:
+        if not electricity and not gas and not costs:
             _LOGGER.debug(
                 "No data available yet for %s — will retry on next poll.", day
             )
             return None
 
-        self._last_data = CoordinatorData(electricity=electricity, gas=gas, costs=costs)
+        self._last_data = CoordinatorData(electricity=electricity, gas=gas)
         _LOGGER.debug(
-            "Fetched %s: %d electricity, %d gas, %d cost entries.",
+            "Fetched %s: %d electricity, %d gas, %d costs entries.",
             day, len(electricity), len(gas), len(costs),
         )
         return await self._inject_statistics(electricity, gas, costs, day, seed_sums)
@@ -119,15 +126,14 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
 
     async def _fetch_day(
         self, day: date
-    ) -> tuple[
-        list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]
-    ]:
-        """Fetch hourly electricity, gas and cost data for *day* from the API."""
+    ) -> tuple[list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]]:
+        """Fetch hourly electricity, gas, and costs data for *day* from the API."""
         electricity: list[MeterReadingEntry] = []
         gas: list[MeterReadingEntry] = []
         costs: list[MeterReadingEntry] = []
         electricity_exception: Exception | None = None
         gas_exception: Exception | None = None
+        costs_exception: Exception | None = None
 
         try:
             electricity = await self._client.get_hourly_energy(
@@ -165,9 +171,10 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
                 )
             )
         except Exception as exc:
-            _LOGGER.debug("Could not fetch cost data for %s: %s", day, exc)
+            costs_exception = exc
+            _LOGGER.debug("Could not fetch costs data for %s: %s", day, exc)
 
-        if electricity_exception is not None and gas_exception is not None:
+        if electricity_exception is not None and gas_exception is not None and costs_exception is not None:
             raise electricity_exception
 
         return electricity, gas, costs
@@ -183,24 +190,32 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
         """
         Inject statistics for one day via each ``ExternalStatistic`` instance.
 
-        Cost statistics are only injected when the matching consumption contract
-        is present (i.e. ``electricity_entries`` / ``gas_entries`` is non-empty).
+        Electricity/production usage comes from ``electricity_entries``.
+        Gas usage and gas cost come from ``gas_entries``.
+        Electricity cost and feed-in compensation come from ``costs_entries``
+        (only when ``electricity_entries`` is non-empty, i.e. there is an
+        electricity contract).
 
         *seed_sums* provides the running total at the start of the day.
         If ``None``, each statistic queries the recorder for its seed value.
 
         Returns the updated sums at the end of the day for chaining.
         """
-        costs = costs_entries if electricity_entries else []
+        # Only inject cost statistics for the relevant contract type:
+        # - electricity costs / compensation only when electricity data exists
+        # - gas cost only when gas data exists
+        elec_cost_entries = costs_entries if electricity_entries else []
+        gas_cost_entries = gas_entries  # gas cost is embedded in gas responses
+
         return await async_inject_day(
             self.hass,
             [
                 (ELECTRICITY_CONSUMED, electricity_entries),
                 (ELECTRICITY_RETURNED, electricity_entries),
                 (GAS_CONSUMED, gas_entries),
-                (ELECTRICITY_COST, costs),
-                (ELECTRICITY_RETURNED_COMPENSATION, costs),
-                (GAS_COST, costs_entries if gas_entries else []),
+                (ELECTRICITY_COST, elec_cost_entries),
+                (ELECTRICITY_RETURNED_COMPENSATION, elec_cost_entries),
+                (GAS_COST, gas_cost_entries),
             ],
             for_date,
             _day_start_utc(for_date),

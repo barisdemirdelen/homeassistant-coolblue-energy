@@ -209,10 +209,10 @@ class ApiClient:
         """
         Fetch hourly energy data for the date specified in *request*.
 
-        Calls the ``getMeterReadings`` Next.js server action and returns the
+        Calls the ``getInsights`` Next.js server action and returns the
         response parsed into typed :class:`~model.MeterReadingEntry` objects.
         """
-        action = await self._action_id("getMeterReadings")
+        action = await self._action_id("getInsights")
         raw = await self._next_action_post(action, request.to_payload())
         return _MeterReadingList.validate_python(_parse_rsc_response(raw))
 
