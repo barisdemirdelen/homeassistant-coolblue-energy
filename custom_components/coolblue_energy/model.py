@@ -18,17 +18,18 @@ The API returns three distinct response shapes depending on ``energy_type``:
 
 Callers therefore make three separate requests and keep the results in separate
 lists.  The response timestamps are Amsterdam local time formatted with a
-misleading ``Z`` suffix; the hour is extracted verbatim to produce an
-Amsterdam-local ``"HH:00"`` label used by the statistics helpers.
+misleading ``Z`` suffix; :attr:`MeterReadingEntry.name` extracts the hour
+verbatim to produce an Amsterdam-local ``"HH:00"`` label used by the
+statistics helpers.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from .util import CoercedFloat
@@ -71,8 +72,12 @@ class GetMeterReadingsRequest(CamelCaseModel):
         # The API expects the start of the requested day in Amsterdam time,
         # expressed as UTC.
         day_start_utc = datetime(
-            self.for_date.year, self.for_date.month, self.for_date.day,
-            0, 0, tzinfo=_TZ_NL,
+            self.for_date.year,
+            self.for_date.month,
+            self.for_date.day,
+            0,
+            0,
+            tzinfo=_TZ_NL,
         ).astimezone(timezone.utc)
         next_date = f"$D{day_start_utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')}"
         return [
@@ -95,16 +100,61 @@ class PeakUsage(CamelCaseModel):
     """kWh split across peak / off-peak / single tariff bands."""
 
     peak: CoercedFloat = 0.0
-    off_peak: CoercedFloat = 0.0   # API field name: "offPeak"
-    single: CoercedFloat = 0.0    # single-tariff meter value
+    off_peak: CoercedFloat = 0.0  # API field name: "offPeak"
+    single: CoercedFloat = 0.0  # single-tariff meter value
     total: CoercedFloat = 0.0
 
 
-class SmartDeviceItemUsage(BaseModel):
+class AmountData(BaseModel):
+    """A monetary amount in EUR, as returned by the API ``cost`` sub-objects."""
+
+    amount: CoercedFloat = 0.0
+
+
+class ElectricityData(BaseModel):
+    """Electricity portion of an API response entry."""
+
+    usage: PeakUsage = Field(default_factory=PeakUsage)
+    cost: AmountData = Field(default_factory=AmountData)
+
+
+class GasData(BaseModel):
+    """Gas portion of an API response entry.
+
+    The ``usage`` field may arrive as either a plain number or a dict with a
+    ``total`` key; the validator normalises both forms to a float.
+    """
+
+    usage: CoercedFloat = 0.0
+    """m³ consumed in this hour."""
+
+    cost: AmountData = Field(default_factory=AmountData)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_usage(cls, data: Any) -> Any:
+        """Flatten ``usage: {"total": x}`` → ``usage: x``."""
+        match data:
+            case {"usage": dict(u), **rest}:
+                return {"usage": u.get("total", 0), **rest}
+        return data
+
+
+class FeedInData(BaseModel):
+    """Solar feed-in portion of an API response entry (``feedIn`` key)."""
+
+    production: PeakUsage = Field(default_factory=PeakUsage)
+    """kWh fed back to the grid.  Values are **positive** as returned by the API."""
+
+    cost: AmountData = Field(default_factory=AmountData)
+    """Feed-in compensation credit; **negative** as returned by the API."""
+
+
+class SmartDeviceItemUsage(CamelCaseModel):
     """Usage breakdown for one smart-device appliance type."""
 
     free: CoercedFloat = 0.0
-    non_free: CoercedFloat = 0.0   # API field name: "nonFree"
+    non_free: CoercedFloat = 0.0  # API field name: "nonFree"
     total: CoercedFloat = 0.0
 
 
@@ -114,45 +164,26 @@ class SmartDeviceItem(BaseModel):
     usage: SmartDeviceItemUsage = Field(default_factory=SmartDeviceItemUsage)
 
 
-class SmartDeviceUsage(BaseModel):
-    """Aggregated smart-device (washing machine / dryer) usage for one hour."""
+class SmartDevicesData(BaseModel):
+    """Aggregated smart-device (washing machine / dryer) usage for one hour
+    (``smartDevices`` key in the API response)."""
 
     washing: SmartDeviceItem = Field(default_factory=SmartDeviceItem)
     drying: SmartDeviceItem = Field(default_factory=SmartDeviceItem)
     cost: CoercedFloat = 0.0
 
 
-class CostComponent(BaseModel):
-    """A cost amount in EUR for one hour."""
-
-    total: CoercedFloat = 0.0
-
-
-class HourlyCosts(BaseModel):
-    """Cost breakdown for one hour: electricity charges, gas charges, and
-    the solar feed-in credit (stored as a negative number, matching the API
-    ``feedIn.cost.amount`` sign convention)."""
-
-    electricity: CostComponent = Field(default_factory=CostComponent)
-    gas: CostComponent = Field(default_factory=CostComponent)
-    production: CoercedFloat = 0.0  # negative → feed-in credit
-
-
 # ── Top-level response entry ──────────────────────────────────────────────────
 
 
-class MeterReadingEntry(BaseModel):
+class MeterReadingEntry(CamelCaseModel):
     """
-    One hourly entry returned by ``getInsights``.
+    One hourly entry returned by ``getInsights``, parsed directly from the
+    API JSON without any field transformation.
 
-    The ``name`` field is an Amsterdam-local ``"HH:00"`` label derived from
-    the response ``timestamp``.  All three response shapes (electricity, gas,
-    costs) are parsed into this same model; fields not relevant to the
-    requested ``energy_type`` will be zero.
-
-    Production values (``production.total``, ``costs.production``) are stored
-    with **inverted sign** relative to the API so that the statistics
-    value functions can uniformly negate them back to positive kWh/EUR.
+    All three response shapes (electricity, gas, costs) map onto this same
+    model; fields not relevant to the requested ``energy_type`` will be
+    zero / absent.
 
     Parse the full response list with::
 
@@ -160,119 +191,36 @@ class MeterReadingEntry(BaseModel):
         entries = TypeAdapter(list[MeterReadingEntry]).validate_python(raw_list)
     """
 
-    name: str
-    """Amsterdam-local hour label, e.g. ``"14:00"``."""
+    timestamp: str
+    """ISO-8601 string in Amsterdam local time with a misleading ``Z`` suffix,
+    e.g. ``"2026-06-08T14:00:00.000Z"`` means 14:00 Amsterdam, not 14:00 UTC."""
 
-    electricity: PeakUsage = Field(default_factory=PeakUsage)
-    """kWh consumed from the grid (non-zero in electricity-type responses)."""
+    electricity: ElectricityData = Field(default_factory=ElectricityData)
+    """Electricity usage (kWh) and cost breakdown."""
 
-    production: PeakUsage = Field(default_factory=PeakUsage)
-    """kWh fed back to the grid, stored **negated** (non-zero in electricity
-    responses that have solar activity)."""
+    gas: GasData = Field(default_factory=GasData)
+    """Gas usage (m³) and cost breakdown."""
 
-    costs: HourlyCosts = Field(default_factory=HourlyCosts)
-    """EUR cost breakdown (non-zero in costs-type responses)."""
+    feed_in: FeedInData | None = None
+    """Solar feed-in data; ``None`` when absent from the API response."""
 
-    smart_device_usage: SmartDeviceUsage = Field(default_factory=SmartDeviceUsage)
+    smart_devices: SmartDevicesData = Field(default_factory=SmartDevicesData)
+    """Smart-device usage breakdown (``smartDevices`` in the API)."""
 
-    price: CoercedFloat = 0.0
-    """Dynamic spot price in EUR/kWh for this hour."""
+    dynamic_price: CoercedFloat = 0.0
+    """Dynamic spot price in EUR/kWh for this hour (``dynamicPrice`` in the API)."""
 
-    gas: CoercedFloat = 0.0
-    """m³ of gas consumed (non-zero in gas-type responses)."""
-
-    @model_validator(mode="before")
+    @field_validator("electricity", "gas", "smart_devices", mode="before")
     @classmethod
-    def _from_api_response(cls, data: object) -> object:
+    def _none_to_empty(cls, v: Any) -> Any:
+        """Coerce ``null`` API values to empty dicts so defaults apply."""
+        return v if v is not None else {}
+
+    @property
+    def name(self) -> str:
+        """Amsterdam-local hour label derived from :attr:`timestamp`, e.g. ``"14:00"``.
+
+        The API returns timestamps in Amsterdam local time with a misleading
+        ``Z`` suffix, so the hour is extracted verbatim from the string.
         """
-        Transform the raw ``getInsights`` JSON dict into domain-model fields.
-
-        The validator is a no-op when the data already uses domain-model keys
-        (i.e. when created directly in tests via keyword arguments).
-
-        API timestamp quirk
-        -------------------
-        The API returns timestamps in **Amsterdam local time** with a
-        misleading ``Z`` suffix (e.g. ``"2026-06-08T14:00:00.000Z"`` means
-        14:00 Amsterdam, not 14:00 UTC).  We therefore extract the hour
-        directly from the string without any timezone conversion.
-        """
-        if not isinstance(data, dict) or "name" in data:
-            return data
-        if "timestamp" not in data:
-            return data
-
-        ts_str: str = data["timestamp"]  # e.g. "2026-06-08T14:00:00.000Z"
-        hour = ts_str[11:13]             # "14"
-        name = f"{hour}:00"
-
-        # ── Electricity usage ──────────────────────────────────────────────
-        elec = data.get("electricity") or {}
-        elec_usage = elec.get("usage") or {}
-        elec_cost_amount = (elec.get("cost") or {}).get("amount", 0)
-
-        # ── Gas usage ─────────────────────────────────────────────────────
-        gas_raw = data.get("gas") or {}
-        gas_usage = gas_raw.get("usage", 0)
-        if isinstance(gas_usage, dict):
-            gas_usage = gas_usage.get("total", 0)
-        gas_cost_amount = (gas_raw.get("cost") or {}).get("amount", 0)
-
-        # ── Solar feed-in ─────────────────────────────────────────────────
-        feed_in = data.get("feedIn")
-        if feed_in:
-            prod_raw = feed_in.get("production") or {}
-            # Store production as **negative** so value_fn = -e.production.total
-            # gives the positive kWh-returned figure.
-            prod_peak     = -(prod_raw.get("peak", 0) or 0)
-            prod_off_peak = -(prod_raw.get("offPeak", 0) or 0)
-            prod_single   = -(prod_raw.get("single", 0) or 0)
-            prod_total    = -(prod_raw.get("total", 0) or 0)
-            # feedIn.cost.amount is already negative (cost credit) — keep sign.
-            prod_cost = (feed_in.get("cost") or {}).get("amount", 0)
-        else:
-            prod_peak = prod_off_peak = prod_single = prod_total = 0.0
-            prod_cost = 0.0
-
-        # ── Smart devices ─────────────────────────────────────────────────
-        smart_raw = data.get("smartDevices") or {}
-
-        def _device_usage(d: dict | None) -> dict:
-            u = (d or {}).get("usage") or {}
-            return {
-                "usage": {
-                    "free":     u.get("free", 0),
-                    "non_free": u.get("nonFree", 0),
-                    "total":    u.get("total", 0),
-                }
-            }
-
-        smart_device_usage = {
-            "washing": _device_usage(smart_raw.get("washing")),
-            "drying":  _device_usage(smart_raw.get("drying")),
-            "cost":    smart_raw.get("cost", 0),
-        }
-
-        return {
-            "name": name,
-            "electricity": {
-                "peak":     elec_usage.get("peak", 0),
-                "off_peak": elec_usage.get("offPeak", 0),
-                "single":   elec_usage.get("single", 0),
-                "total":    elec_usage.get("total", 0),
-            },
-            "production": {
-                "peak":     prod_peak,
-                "off_peak": prod_off_peak,
-                "single":   prod_single,
-                "total":    prod_total,
-            },
-            "costs": {
-                "electricity": {"total": elec_cost_amount},
-                "gas":         {"total": gas_cost_amount},
-                "production":  prod_cost,
-            },
-            "smart_device_usage": smart_device_usage,
-            "price":              data.get("dynamicPrice", 0),
-            "gas":                gas_usage,
-        }
+        return f"{self.timestamp[11:13]}:00"

@@ -369,7 +369,7 @@ class TestInjectStatistics:
         """STAT_ELECTRICITY_COST must only track electricity.total, not production credit."""
         from .conftest import make_day_costs
 
-        costs = make_day_costs(electricity_cost=0.30, production=-0.08)
+        costs = make_day_costs(electricity_cost=0.30, production_cost=-0.08)
         captured = {}
 
         def capture(hass, metadata, stat_data):
@@ -394,7 +394,7 @@ class TestInjectStatistics:
         """STAT_ELECTRICITY_RETURNED_COMPENSATION must track -production per entry."""
         from .conftest import make_day_costs
 
-        costs = make_day_costs(electricity_cost=0.25, production=-0.05)
+        costs = make_day_costs(electricity_cost=0.25, production_cost=-0.05)
         captured = {}
 
         def capture(hass, metadata, stat_data):

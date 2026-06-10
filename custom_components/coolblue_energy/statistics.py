@@ -82,7 +82,7 @@ ELECTRICITY_CONSUMED: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
     unit_class="energy",
     period_start_fn=_ts,
-    value_fn=lambda e: e.electricity.total,
+    value_fn=lambda e: e.electricity.usage.total,
 )
 
 ELECTRICITY_RETURNED: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
@@ -92,8 +92,8 @@ ELECTRICITY_RETURNED: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
     unit_class="energy",
     period_start_fn=_ts,
-    # production.total is stored negated; negate again → positive kWh returned.
-    value_fn=lambda e: -e.production.total,
+    # feed_in.production.total is positive as returned by the API.
+    value_fn=lambda e: e.feed_in.production.total if e.feed_in else 0.0,
 )
 
 GAS_CONSUMED: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
@@ -103,7 +103,7 @@ GAS_CONSUMED: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_of_measurement=UnitOfVolume.CUBIC_METERS,
     unit_class="volume",
     period_start_fn=_ts,
-    value_fn=lambda e: e.gas,
+    value_fn=lambda e: e.gas.usage,
 )
 
 ELECTRICITY_COST: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
@@ -114,7 +114,7 @@ ELECTRICITY_COST: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_class=None,
     period_start_fn=_ts,
     # Cost comes from the dedicated "costs" API response.
-    value_fn=lambda e: e.costs.electricity.total,
+    value_fn=lambda e: e.electricity.cost.amount,
 )
 
 ELECTRICITY_RETURNED_COMPENSATION: ExternalStatistic[MeterReadingEntry] = (
@@ -125,8 +125,8 @@ ELECTRICITY_RETURNED_COMPENSATION: ExternalStatistic[MeterReadingEntry] = (
         unit_of_measurement=CURRENCY_EURO,
         unit_class=None,
         period_start_fn=_ts,
-        # costs.production is negative (credit); negate → positive compensation.
-        value_fn=lambda e: -e.costs.production,
+        # feed_in.cost.amount is negative (credit); negate → positive compensation.
+        value_fn=lambda e: -(e.feed_in.cost.amount if e.feed_in else 0.0),
     )
 )
 
@@ -137,8 +137,8 @@ GAS_COST: ExternalStatistic[MeterReadingEntry] = ExternalStatistic(
     unit_of_measurement=CURRENCY_EURO,
     unit_class=None,
     period_start_fn=_ts,
-    # Cost comes from gas entries (costs.gas.total is populated in gas responses).
-    value_fn=lambda e: e.costs.gas.total,
+    # Cost comes from costs entries (gas.cost.amount is populated in costs responses).
+    value_fn=lambda e: e.gas.cost.amount,
 )
 
 ALL_STATISTICS: tuple[ExternalStatistic[MeterReadingEntry], ...] = (

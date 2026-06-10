@@ -6,25 +6,26 @@ Shared utilities for the Coolblue Energy integration.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BeforeValidator
 
 
-def coerce_float(v: object) -> float:
+def coerce_float(v: Any) -> float:
     """
     Coerce API float fields that may arrive as ``None`` or a ``'$-0'``-style
     RSC wire-format-prefixed string (Next.js encodes ``-0`` as ``'$-0'``).
     """
-    if v is None:
-        return 0.0
-    if isinstance(v, str):
-        cleaned = v.replace("$", "").strip()
-        try:
-            return float(cleaned)
-        except ValueError:
+    match v:
+        case None:
             return 0.0
-    return float(v)
+        case str():
+            try:
+                return float(v.replace("$", "").strip())
+            except ValueError:
+                return 0.0
+        case _:
+            return float(v)
 
 
 CoercedFloat = Annotated[float, BeforeValidator(coerce_float)]

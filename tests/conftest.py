@@ -7,50 +7,51 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.coolblue_energy.model import (
-    CostComponent,
-    HourlyCosts,
+    AmountData,
+    ElectricityData,
+    FeedInData,
+    GasData,
     MeterReadingEntry,
     PeakUsage,
 )
 
 # ── Factory helpers ───────────────────────────────────────────────────────────
 
+_FAKE_DATE = "2026-01-01"
+
+
+def _ts(hour: int) -> str:
+    return f"{_FAKE_DATE}T{hour:02d}:00:00.000Z"
+
 
 def make_electricity_entry(
     hour: int,
     electricity: float = 1.0,
-    production: float = -0.2,
+    production: float = 0.2,
     price: float = 0.25,
     electricity_cost: float = 0.25,
 ) -> MeterReadingEntry:
     """Create one hourly electricity-type MeterReadingEntry."""
     return MeterReadingEntry(
-        name=f"{hour:02d}:00",
-        electricity=PeakUsage(total=electricity, off_peak=0.6, peak=0.4),
-        production=PeakUsage(total=production, off_peak=production, peak=0.0),
-        costs=HourlyCosts(
-            electricity=CostComponent(total=electricity_cost),
-            gas=CostComponent(total=0.10),
-            production=-0.05,
+        timestamp=_ts(hour),
+        electricity=ElectricityData(
+            usage=PeakUsage(total=electricity, off_peak=0.6, peak=0.4),
+            cost=AmountData(amount=electricity_cost),
         ),
-        price=price,
-        gas=0.0,
+        gas=GasData(usage=0.0),
+        feed_in=FeedInData(
+            production=PeakUsage(total=production, off_peak=production, peak=0.0),
+            cost=AmountData(amount=-0.05),
+        ),
+        dynamic_price=price,
     )
 
 
 def make_gas_entry(hour: int, gas: float = 0.05) -> MeterReadingEntry:
     """Create one hourly gas-type MeterReadingEntry."""
     return MeterReadingEntry(
-        name=f"{hour:02d}:00",
-        electricity=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
-        production=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
-        costs=HourlyCosts(
-            electricity=CostComponent(total=0.0),
-            gas=CostComponent(total=0.0),  # gas costs come from "costs" API call
-            production=0.0,
-        ),
-        price=0.0,
-        gas=gas,
+        timestamp=_ts(hour),
+        gas=GasData(usage=gas),
     )
 
 
@@ -58,7 +59,7 @@ def make_cost_entry(
     hour: int,
     electricity_cost: float = 0.25,
     gas_cost: float = 0.10,
-    production: float = 0.0,
+    production_cost: float = 0.0,
 ) -> MeterReadingEntry:
     """Create one hourly costs-type MeterReadingEntry (from the 'costs' API request).
 
@@ -66,21 +67,15 @@ def make_cost_entry(
     fields carry meaningful data in this response type.
     """
     return MeterReadingEntry(
-        name=f"{hour:02d}:00",
-        electricity=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
-        production=PeakUsage(total=0.0, off_peak=0.0, peak=0.0),
-        costs=HourlyCosts(
-            electricity=CostComponent(total=electricity_cost),
-            gas=CostComponent(total=gas_cost),
-            production=production,
-        ),
-        price=0.0,
-        gas=0.0,
+        timestamp=_ts(hour),
+        electricity=ElectricityData(cost=AmountData(amount=electricity_cost)),
+        gas=GasData(cost=AmountData(amount=gas_cost)),
+        feed_in=FeedInData(cost=AmountData(amount=production_cost)) if production_cost else None,
     )
 
 
 def make_day_electricity(
-    n_hours: int = 24, electricity: float = 1.0, production: float = -0.2
+    n_hours: int = 24, electricity: float = 1.0, production: float = 0.2
 ) -> list[MeterReadingEntry]:
     """Return *n_hours* uniform electricity entries."""
     return [
@@ -96,12 +91,12 @@ def make_day_gas(n_hours: int = 24, gas: float = 0.05) -> list[MeterReadingEntry
 
 def make_day_costs(
     n_hours: int = 24, electricity_cost: float = 0.25, gas_cost: float = 0.10,
-    production: float = 0.0,
+    production_cost: float = 0.0,
 ) -> list[MeterReadingEntry]:
     """Return *n_hours* uniform cost entries (from the 'costs' API request)."""
     return [
         make_cost_entry(h, electricity_cost=electricity_cost, gas_cost=gas_cost,
-                        production=production)
+                        production_cost=production_cost)
         for h in range(n_hours)
     ]
 

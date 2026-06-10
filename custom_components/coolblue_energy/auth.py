@@ -69,12 +69,12 @@ def _get_csrf(html: str, view: str) -> str:
         if form:
             csrf_input = form.find("input", {"name": "csrf"})
             if csrf_input:
-                return csrf_input["value"]  # type: ignore[return-value]
+                return str(csrf_input["value"])
 
     csrf_input = soup.find("input", {"name": "csrf"})
     if not csrf_input:
         raise ValueError(f"No CSRF token found on page (looking for view={view!r})")
-    return csrf_input["value"]  # type: ignore[return-value]
+    return str(csrf_input["value"])
 
 
 # ── AuthService ───────────────────────────────────────────────────────────────
@@ -104,7 +104,8 @@ class AuthService:
         """Return the authenticated session, authenticating lazily if needed."""
         if self._session is None or self._session.closed:
             await self.authenticate()
-        return self._session  # type: ignore[return-value]
+        assert self._session is not None
+        return self._session
 
     async def authenticate(self) -> None:
         """
@@ -170,9 +171,7 @@ class AuthService:
     async def _oidc_round(self, session: aiohttp.ClientSession, auth_url: str) -> None:
         """Complete one OIDC email + password round starting from *auth_url*."""
         logger.debug("OIDC round: GET %s", auth_url[:80])
-        async with session.get(
-            auth_url, headers={"Sec-Fetch-Site": "none"}
-        ) as r:
+        async with session.get(auth_url, headers={"Sec-Fetch-Site": "none"}) as r:
             if r.status == 403:
                 raise RuntimeError(
                     f"Cloudfront blocked the accounts login page (403). "
