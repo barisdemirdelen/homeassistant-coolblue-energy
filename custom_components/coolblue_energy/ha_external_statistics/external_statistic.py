@@ -124,7 +124,7 @@ class ExternalStatistic(Generic[T]):
             start_utc = self.period_start_fn(entry, for_date)
             value = self.value_fn(entry)
 
-            point: dict = {"start": start_utc, "state": value}
+            point = StatisticData(start=start_utc, state=value)
 
             if self.has_sum:
                 running_sum += value
@@ -137,7 +137,7 @@ class ExternalStatistic(Generic[T]):
             if self.max_fn is not None:
                 point["max"] = self.max_fn(entry)
 
-            stat_data.append(point)  # type: ignore[arg-type]
+            stat_data.append(point)
 
         return stat_data, running_sum
 

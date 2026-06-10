@@ -41,7 +41,7 @@ def _ts(entry: Entry, for_date: date) -> datetime:
 
 
 def _make_stat(**kwargs) -> ExternalStatistic[Entry]:
-    defaults = dict(
+    defaults: dict = dict(
         statistic_id="test_domain:test_stat",
         name="Test Stat",
         source="test_domain",
@@ -51,7 +51,7 @@ def _make_stat(**kwargs) -> ExternalStatistic[Entry]:
         value_fn=lambda e: e.value,
     )
     defaults.update(kwargs)
-    return ExternalStatistic(**defaults)
+    return ExternalStatistic[Entry](**defaults)
 
 
 # ---------------------------------------------------------------------------
