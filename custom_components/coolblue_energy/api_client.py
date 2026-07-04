@@ -34,7 +34,7 @@ _MeterReadingList = TypeAdapter(list[MeterReadingEntry])
 
 # ── Module-level constants ────────────────────────────────────────────────────
 
-ENERGY_URL = "https://www.coolblue.nl/en/my-coolblue-account/energy/energy-usage"
+ENERGY_URL = "https://www.coolblue.nl/nl/mijn-coolblue-account/energie/energieverbruik"
 
 # URL-encoded next-router-state-tree for the energy-usage page
 # (derived from observed browser traffic; update if the route structure changes)

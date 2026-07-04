@@ -123,13 +123,13 @@ class AuthService:
             logger.debug("Auth round 1: establish Coolblue-Session")
             await self._oidc_round(session, _auth_url())
 
-            # Round 2: GET energy page → 307 → /en/login?returnUrl=… → accounts URL
+            # Round 2: GET energy page → redirect → /nl/inloggen?returnUrl=… → accounts URL
             # That accounts URL carries returnUrl in its state, causing the OIDC
             # callback to also issue Secure-Coolblue.
             logger.debug("Auth round 2: obtain Secure-Coolblue")
             async with session.get(self._energy_url, allow_redirects=False) as r:
                 logger.debug("Round 2 energy page status: %d", r.status)
-                if r.status == 307:
+                if r.status in (301, 302, 303, 307, 308):
                     loc = r.headers.get("Location", "")
                     if loc.startswith("/"):
                         loc = "https://www.coolblue.nl" + loc
@@ -151,7 +151,7 @@ class AuthService:
                             )
                 else:
                     logger.warning(
-                        "Round 2: expected 307 from energy page but got %d "
+                        "Round 2: expected a redirect from energy page but got %d "
                         "— Secure-Coolblue will not be set",
                         r.status,
                     )
