@@ -442,7 +442,7 @@ class TestAsyncBackfill:
         """
         On a clean DB (no prior stats), each day must start from the previous
         day's end sum without re-querying the DB.
-        Only the initial 3 _get_sum_before calls (one per stat) are expected.
+        Only the initial 6 _get_sum_before calls (one per stat) are expected.
         """
         get_sum_calls = []
 
@@ -596,18 +596,28 @@ class TestAsyncRetryRecentDays:
     # ── empty-day handling ────────────────────────────────────────────────────
 
     async def test_skips_injection_for_empty_day(self, coordinator):
-        """A day that returns ([], [], []) must not trigger async_add_external_statistics."""
+        """A day that returns ([], [], []) must not inject any data for that day."""
+        empty_day = date.today() - timedelta(days=2)
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 2:
+            if day == empty_day:
                 return [], [], []
             return await original_fetch(day)
 
         coordinator._fetch_day = patched_fetch
 
-        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH) as mock_add:
+        injected_starts = []
+
+        def capture(hass, metadata, stat_data):
+            injected_starts.extend(e["start"] for e in stat_data)
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH, side_effect=capture):
             await coordinator._async_retry_recent_days(3)
+
+        empty_day_utc = _day_start_utc(empty_day)
+        empty_day_end_utc = _day_start_utc(empty_day + timedelta(days=1))
+        assert not any(empty_day_utc <= s < empty_day_end_utc for s in injected_starts)
 
     async def test_empty_day_still_processes_remaining_days(self, coordinator):
         """An empty day must not abort subsequent days — all N fetches must run."""
@@ -1135,11 +1145,16 @@ class TestPartialContracts:
         coordinator._client.get_hourly_energy.side_effect = (
             self._electricity_only_side_effect(fake_electricity)
         )
+        injected_ids = []
 
-        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH) as mock_add:
+        def capture(hass, metadata, stat_data):
+            injected_ids.append(metadata["statistic_id"])
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH, side_effect=capture):
             await coordinator._async_retry_recent_days(1)
 
-        assert mock_add.call_count > 0
+        assert STAT_ELECTRICITY_CONSUMED in injected_ids
+        assert STAT_ELECTRICITY_RETURNED in injected_ids
 
     # ── gas-only ──────────────────────────────────────────────────────────────
 
@@ -1198,11 +1213,16 @@ class TestPartialContracts:
         coordinator._client.get_hourly_energy.side_effect = self._gas_only_side_effect(
             fake_gas
         )
+        injected_ids = []
 
-        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH) as mock_add:
+        def capture(hass, metadata, stat_data):
+            injected_ids.append(metadata["statistic_id"])
+
+        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH, side_effect=capture):
             await coordinator._async_retry_recent_days(1)
 
-        assert mock_add.call_count > 0
+        assert STAT_GAS_CONSUMED in injected_ids
+        assert STAT_GAS_COST in injected_ids
 
     # ── sensor display with partial data ──────────────────────────────────────
 
