@@ -91,7 +91,7 @@ def _parse_rsc_response(text: str):
                 parsed = json.loads(stripped)
                 if not _is_metadata_dict(parsed):
                     return parsed
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError, ValueError:
                 continue
 
     # Pass 2: any line that parses as JSON (handles prefix-less responses)
@@ -100,7 +100,7 @@ def _parse_rsc_response(text: str):
             parsed = json.loads(line)
             if not _is_metadata_dict(parsed):
                 return parsed
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             continue
 
     raise ValueError(f"Could not find payload line in RSC response:\n{text[:200]}")
@@ -124,9 +124,8 @@ class ApiClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         return await self._auth.get_session()
 
-    async def _retry_with_backoff(
-        self, fn_name: str, operation, max_retries: int = 2
-    ):
+    @staticmethod
+    async def _retry_with_backoff(fn_name: str, operation, max_retries: int = 2):
         """Execute *operation* with retries on transient failures.
 
         Retries on: server errors (5xx), connection timeouts.
@@ -141,20 +140,27 @@ class ApiClient:
                 return await operation()
             except aiohttp.ClientResponseError as exc:
                 if 400 <= exc.status < 500:
-                    logger.debug("Not retrying %s on client error %d", fn_name, exc.status)
+                    logger.debug(
+                        "Not retrying %s on client error %d", fn_name, exc.status
+                    )
                     raise
                 last_exc = exc
                 logger.warning(
                     "%s attempt %d failed (HTTP %d), retrying in %.1fs ...",
-                    fn_name, attempt + 1, exc.status, delay,
+                    fn_name,
+                    attempt + 1,
+                    exc.status,
+                    delay,
                 )
             except asyncio.TimeoutError as exc:
                 last_exc = exc
                 logger.warning(
                     "%s attempt %d timed out, retrying in %.1fs ...",
-                    fn_name, attempt + 1, delay,
+                    fn_name,
+                    attempt + 1,
+                    delay,
                 )
-            except (RuntimeError, ValueError):
+            except RuntimeError, ValueError:
                 # Deterministic failures (bad data, field renames, etc.) are not retried.
                 raise
             await asyncio.sleep(delay)
@@ -243,14 +249,15 @@ class ApiClient:
         """Try to extract debtor/location from __NEXT_DATA__ script."""
         nx_match = re.search(
             r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
-            html, re.DOTALL,
+            html,
+            re.DOTALL,
         )
         if not nx_match:
             return None
 
         try:
             data = json.loads(nx_match.group(1))
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             return None
 
         def _dig(d, key):
