@@ -9,6 +9,7 @@
     "recorder"
   ],
   "documentation": "https://github.com/barisdemirdelen/homeassistant-coolblue-energy",
+  "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/barisdemirdelen/homeassistant-coolblue-energy/issues",
   "requirements": [
