@@ -22,14 +22,18 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api_client import API_ERRORS, ApiClient
 from .const import (
     BACKFILL_DAYS,
+    CONF_DEBTOR_ID,
+    CONF_LOCATION_ID,
     DOMAIN,
     RETRY_DAYS,
+    SCAN_INTERVAL,
 )
 from .ha_external_statistics.recorder import async_inject_day
 from .ha_external_statistics.statistics_mixin import StatisticsLoopMixin
@@ -58,6 +62,17 @@ class CoordinatorData:
     gas: list[MeterReadingEntry]
 
 
+@dataclass
+class CoolblueRuntimeData:
+    """What a loaded config entry owns, reachable as ``entry.runtime_data``."""
+
+    coordinator: CoolblueCoordinator
+    client: ApiClient
+
+
+type CoolblueConfigEntry = ConfigEntry[CoolblueRuntimeData]
+
+
 # ── Coordinator ───────────────────────────────────────────────────────────────
 
 
@@ -73,20 +88,21 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
     def __init__(
         self,
         hass: HomeAssistant,
+        entry: CoolblueConfigEntry,
         client: ApiClient,
-        debtor_id: str,
-        location_id: str,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
+            update_interval=SCAN_INTERVAL,
             backfill_days=BACKFILL_DAYS,
             retry_days=RETRY_DAYS,
         )
         self._client = client
-        self._debtor_id = debtor_id
-        self._location_id = location_id
+        self._debtor_id: str = entry.data[CONF_DEBTOR_ID]
+        self._location_id: str = entry.data[CONF_LOCATION_ID]
         self._last_data: CoordinatorData = CoordinatorData(electricity=[], gas=[])
 
     # ── DataUpdateCoordinator hook ────────────────────────────────────────────

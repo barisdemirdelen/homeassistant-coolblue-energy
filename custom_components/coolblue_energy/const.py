@@ -5,7 +5,6 @@ from homeassistant.const import CURRENCY_EURO, UnitOfEnergy, UnitOfVolume
 DOMAIN = "coolblue_energy"
 DEFAULT_NAME = "Coolblue Energy"
 
-PLATFORMS: list[str] = []
 SCAN_INTERVAL = timedelta(hours=6)
 BACKFILL_DAYS = 7
 # How many recent days to re-check on every normal refresh.
@@ -19,6 +18,7 @@ CONF_LOCATION_ID = "location_id"
 
 # Service names
 SERVICE_REIMPORT_STATISTICS = "reimport_statistics"
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 ATTR_START_DATE = "start_date"
 
 # External statistic IDs — must be prefixed with DOMAIN

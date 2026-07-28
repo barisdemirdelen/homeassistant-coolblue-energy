@@ -6,8 +6,15 @@ import logging
 from unittest.mock import AsyncMock
 
 import pytest
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.coolblue_energy.const import (
+    CONF_DEBTOR_ID,
+    CONF_LOCATION_ID,
+    DOMAIN,
+)
 from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
 from custom_components.coolblue_energy.model import (
     AmountData,
@@ -29,6 +36,13 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 # The account every test acts on: one debtor, one metered location.
 DEBTOR_ID = "00844083"
 LOCATION_ID = "3addb383-a979-40b4-8487-0f3bc0854da5"
+
+ENTRY_DATA = {
+    CONF_EMAIL: "user@example.com",
+    CONF_PASSWORD: "hunter2",
+    CONF_DEBTOR_ID: DEBTOR_ID,
+    CONF_LOCATION_ID: LOCATION_ID,
+}
 
 _FAKE_DATE = "2026-01-01"
 
@@ -161,9 +175,21 @@ def mock_api_client(fake_electricity, fake_gas, fake_costs) -> AsyncMock:
 
 
 @pytest.fixture
+def config_entry() -> MockConfigEntry:
+    """A Coolblue Energy config entry with credentials already resolved."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="Coolblue Energy",
+        data=ENTRY_DATA,
+        unique_id=DEBTOR_ID,
+    )
+
+
+@pytest.fixture
 def coordinator(
     recorder_mock: None,
     hass: HomeAssistant,
+    config_entry: MockConfigEntry,
     mock_api_client: AsyncMock,
 ) -> CoolblueCoordinator:
     """A real ``CoolblueCoordinator`` on a real Home Assistant, backed by a real recorder.
@@ -171,4 +197,5 @@ def coordinator(
     ``recorder_mock`` must be requested before anything that reads statistics:
     it is what makes ``get_instance(hass)`` resolve to a running recorder.
     """
-    return CoolblueCoordinator(hass, mock_api_client, DEBTOR_ID, LOCATION_ID)
+    config_entry.add_to_hass(hass)
+    return CoolblueCoordinator(hass, config_entry, mock_api_client)

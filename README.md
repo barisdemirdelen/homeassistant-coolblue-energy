@@ -124,15 +124,21 @@ Re-fetches and re-injects all hourly statistics from a given date through yester
 Use this to fix gaps, negative spikes, or other artefacts in the Energy Dashboard
 (e.g. after a prolonged HA downtime or an API outage).
 
-| Field        | Type   | Required | Description                                  |
-|--------------|--------|----------|----------------------------------------------|
-| `start_date` | `date` | ✅        | First day to reimport (format: `YYYY-MM-DD`) |
+| Field             | Type     | Required | Description                                  |
+|-------------------|----------|----------|----------------------------------------------|
+| `config_entry_id` | `string` | ✅        | The Coolblue Energy debtor to reimport       |
+| `start_date`      | `date`   | ✅        | First day to reimport (format: `YYYY-MM-DD`) |
+
+A reimport overwrites stored history, so it always names the debtor it acts on.
+An identifier that does not resolve to a loaded debtor is rejected outright and
+nothing is reimported.
 
 **Example — reimport the last 30 days via Developer Tools → Services:**
 
 ```yaml
 service: coolblue_energy.reimport_statistics
 data:
+  config_entry_id: 01JCQ0Z6X0Y7WGT3M2C4K8V5N9
   start_date: "2026-03-05"
 ```
 
