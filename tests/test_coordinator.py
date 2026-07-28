@@ -14,6 +14,7 @@ keys), so dict-style access is used throughout.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -52,6 +53,16 @@ _ALL_STATS = (
     STAT_GAS_COST,
 )
 _EMPTY_SEED = {s: 0.0 for s in _ALL_STATS}
+
+
+def _spy_on(target: object, name: str) -> Any:
+    """Count calls to a real method of *target* without replacing its behaviour.
+
+    The coordinator is a real ``DataUpdateCoordinator``, so methods like
+    ``async_set_updated_data`` do real work that must still happen while a test
+    asserts on how often it was reached.
+    """
+    return patch.object(target, name, wraps=getattr(target, name))
 
 
 # ── Timezone helpers ──────────────────────────────────────────────────────────
@@ -124,10 +135,10 @@ class TestDayStartUtc:
         )
 
 
-# ── _get_sum_before ───────────────────────────────────────────────────────────
+# ── async_get_last_sum ────────────────────────────────────────────────────────
 
 
-class TestGetSumBefore:
+class TestAsyncGetLastSum:
     async def test_returns_zero_when_no_data(self, coordinator):
         before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=UTC)
         with patch(_STATS_PATH, return_value={}):
@@ -216,7 +227,7 @@ class TestInjectStatistics:
     async def test_queries_db_when_seed_is_none(
         self, coordinator, fake_electricity, fake_gas, fake_costs
     ):
-        """seed_sums=None must trigger a _get_sum_before call for each stat."""
+        """seed_sums=None must trigger an async_get_last_sum call for each stat."""
         queried = []
 
         async def spy(hass, stat_id, dt, **kwargs):
@@ -439,7 +450,7 @@ class TestAsyncBackfill:
         """
         On a clean DB (no prior stats), each day must start from the previous
         day's end sum without re-querying the DB.
-        Only the initial 6 _get_sum_before calls (one per stat) are expected.
+        Only the initial 6 async_get_last_sum calls (one per stat) are expected.
         """
         get_sum_calls = []
 
@@ -645,8 +656,6 @@ class TestAsyncRetryRecentDays:
             get_sum_calls.append(stat_id)
             return 0.0
 
-        coordinator._get_sum_before = spy_get_sum
-
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
@@ -763,7 +772,7 @@ class TestAsyncRetryRecentDays:
 
     async def test_seeds_chained_across_consecutive_successful_days(self, coordinator):
         """
-        With N consecutive successful days, _get_sum_before must only be called
+        With N consecutive successful days, async_get_last_sum must only be called
         3 times total (once per stat for the oldest day).  The remaining days
         reuse the chained end-sums without extra DB queries.
         """
@@ -842,36 +851,42 @@ class TestAsyncReimportStatistics:
 
     async def test_does_nothing_when_start_is_today(self, coordinator):
         """start_date == today must not fetch anything."""
-        coordinator.async_refresh = AsyncMock()
-
-        with patch(_ADD_PATH) as mock_add:
+        with (
+            patch(_ADD_PATH) as mock_add,
+            _spy_on(coordinator, "async_refresh") as async_refresh,
+        ):
             await coordinator.async_reimport_statistics(dt_util.now().date())
 
         coordinator._client.get_hourly_energy.assert_not_called()
         mock_add.assert_not_called()
-        coordinator.async_refresh.assert_not_called()
+        async_refresh.assert_not_called()
 
     async def test_does_nothing_when_start_is_future(self, coordinator):
         """start_date in the future must not fetch anything."""
-        coordinator.async_refresh = AsyncMock()
-
-        with patch(_ADD_PATH) as mock_add:
+        with (
+            patch(_ADD_PATH) as mock_add,
+            _spy_on(coordinator, "async_refresh") as async_refresh,
+        ):
             await coordinator.async_reimport_statistics(
                 dt_util.now().date() + timedelta(days=3)
             )
 
         coordinator._client.get_hourly_energy.assert_not_called()
         mock_add.assert_not_called()
-        coordinator.async_refresh.assert_not_called()
+        async_refresh.assert_not_called()
 
     async def test_calls_async_set_updated_data_after_completion(self, coordinator):
         """async_set_updated_data must be called once after all days are processed."""
         start = dt_util.now().date() - timedelta(days=3)
 
-        with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
+        with (
+            patch(_STATS_PATH, return_value={}),
+            patch(_ADD_PATH),
+            _spy_on(coordinator, "async_set_updated_data") as async_set_updated_data,
+        ):
             await coordinator.async_reimport_statistics(start)
 
-        coordinator.async_set_updated_data.assert_called_once()
+        async_set_updated_data.assert_called_once()
 
     # ── data handling ─────────────────────────────────────────────────────────
 
@@ -960,10 +975,13 @@ class TestAsyncReimportStatistics:
         start = dt_util.now().date() - timedelta(days=2)
         coordinator._client.get_hourly_energy.side_effect = RuntimeError("down")
 
-        with patch(_STATS_PATH, return_value={}):
+        with (
+            patch(_STATS_PATH, return_value={}),
+            _spy_on(coordinator, "async_set_updated_data") as async_set_updated_data,
+        ):
             await coordinator.async_reimport_statistics(start)
 
-        coordinator.async_set_updated_data.assert_called_once()
+        async_set_updated_data.assert_called_once()
 
 
 # ── _fetch_day — partial contract support ─────────────────────────────────────

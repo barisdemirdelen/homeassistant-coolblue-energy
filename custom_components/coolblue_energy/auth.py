@@ -78,6 +78,18 @@ def _get_csrf(html: str, view: str) -> str:
     return str(csrf_input["value"])
 
 
+# ── Exceptions ────────────────────────────────────────────────────────────────
+
+
+class CoolblueAuthError(RuntimeError):
+    """Coolblue rejected the account credentials.
+
+    Raised where a login is refused, so callers branch on the type instead of
+    reading an error message. A ``RuntimeError`` subclass because that is what
+    ``api_client.API_ERRORS`` already promises callers of the client.
+    """
+
+
 # ── AuthService ───────────────────────────────────────────────────────────────
 
 
@@ -113,7 +125,8 @@ class AuthService:
         Perform the full two-round OIDC login flow and store the session.
 
         :raises aiohttp.ClientResponseError: on non-2xx HTTP responses
-        :raises RuntimeError:                on credential or flow errors
+        :raises CoolblueAuthError:           when Coolblue rejects the credentials
+        :raises RuntimeError:                on other flow errors
         """
         if self._session and not self._session.closed:
             await self._session.close()
@@ -221,9 +234,9 @@ class AuthService:
                 )
             if r.status not in (301, 302, 303, 307, 308):
                 r.raise_for_status()
-                raise RuntimeError(
-                    "OIDC round: expected a redirect after password POST "
-                    f"but got {r.status}. Check credentials."
+                raise CoolblueAuthError(
+                    "Coolblue did not accept the account credentials: expected a "
+                    f"redirect after the password POST but got {r.status}."
                 )
             callback_url = r.headers["Location"]
             if callback_url.startswith("/"):
@@ -247,9 +260,9 @@ class AuthService:
                 )
             r.raise_for_status()
             if "accounts.coolblue.nl" in str(r.url):
-                raise RuntimeError(
-                    "OIDC round failed – still on accounts page after callback. "
-                    "Check credentials."
+                raise CoolblueAuthError(
+                    "Coolblue did not accept the account credentials: still on the "
+                    "accounts page after the OIDC callback."
                 )
 
     async def close(self) -> None:

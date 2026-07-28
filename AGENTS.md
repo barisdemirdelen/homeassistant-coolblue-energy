@@ -85,28 +85,35 @@ Test at the existing seams, one file per seam:
 | `api_client.ApiClient` (HTTP/parse)   | `tests/test_api_client.py`   |
 | `coordinator` (fetch → statistics)    | `tests/test_coordinator.py`  |
 | `config_flow` (setup UI)              | `tests/test_config_flow.py`  |
-| config entry lifecycle (real HA)      | `tests/test_config_entry.py` |
+| config entry lifecycle                | `tests/test_config_entry.py` |
+| integration metadata                  | `tests/test_metadata.py`     |
 
 Assert on observable behavior at those boundaries, not on private helpers or internal call
 order. Fixtures and entry factories live in `tests/conftest.py` (`make_electricity_entry`,
-`make_day_gas`, `mock_api_client`, `mock_hass`, `coordinator`, …) — build test data from
+`make_day_gas`, `mock_api_client`, `coordinator`, …) — build test data from
 those helpers instead of hand-rolling `MeterReadingEntry` literals, and add new factories
 there rather than duplicating setup per test.
 
-### Two harnesses, temporarily
+### The test harness
 
-Most of the suite runs against `mock_hass`, a hand-rolled `MagicMock` Home Assistant, plus an
-autouse `patch_get_instance` fixture that fakes the recorder. `tests/test_config_entry.py`
-runs against a **real** Home Assistant via `pytest-homeassistant-custom-component`
-(dev-group only — never add it to `manifest.json`, it must not reach a user's install).
+There is exactly one way to get a Home Assistant instance: the `hass` fixture from
+`pytest-homeassistant-custom-component` (dev-group only — never add it to `manifest.json`, it
+must not reach a user's install). There is no mock Home Assistant. Don't build one.
 
-The real harness is where new tests go; the mock one is being migrated away. Two rules when
-writing against it:
+Two rules when writing against it:
 
-- Request `recorder_mock` **before** `enable_custom_integrations` in the test signature. The
+- Request `recorder_mock` **before** `hass` and before `enable_custom_integrations`. The
   integration declares a `recorder` dependency and the plugin asserts this ordering.
-- Shadow the autouse `patch_get_instance` fixture with a no-op at module level, so
-  `get_instance` resolves to the recorder `recorder_mock` started.
+- Spy on a real method rather than replacing it — `_spy_on` in `tests/test_coordinator.py`
+  wraps the bound method so the call still does its work while the test counts it.
+
+Statistics tests go *through* the recorder, not around it: write with
+`ExternalStatistic.inject`, then read back with `async_stat_rows`
+(`tests/ha_external_statistics/conftest.py`) or with the helper under test. Patching
+`statistics_during_period` only proves the code called it.
+
+`StatisticsLoopMixin` is the exception that needs no harness: it never touches `hass`, so
+`tests/ha_external_statistics/test_statistics_mixin.py` drives it through a plain subclass.
 
 The plugin pins an exact Home Assistant version, so `homeassistant` and
 `pytest-homeassistant-custom-component` must be bumped in lockstep.
@@ -124,6 +131,17 @@ value: `version` in `pyproject.toml` and `version` in
 `custom_components/coolblue_energy/manifest.json`. The release workflow re-stamps
 `manifest.json` from the GitHub release tag and **fails the release** if
 the committed value doesn't match, so a bump that misses one file breaks publishing.
+`tests/test_metadata.py` fails when the two drift.
+
+## Quality scale
+
+`custom_components/coolblue_energy/quality_scale.yaml` is a **self-assessment** at the Home
+Assistant Bronze tier: all 20 Bronze rules, each `done` or `exempt` with a reason. hassfest
+grades core integrations only and skips this file, so `tests/test_metadata.py` is what keeps
+it in step — it checks the rule set is complete, that nothing is left outstanding, that every
+exemption gives a reason, that the three entity rules share one wording (ADR 0001), and that
+the polling justification still names the interval `SCAN_INTERVAL` actually uses. A rule that
+cannot honestly be marked done stays visible; an overstating file is worse than none.
 
 ## Housekeeping
 

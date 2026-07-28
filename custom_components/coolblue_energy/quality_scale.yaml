@@ -1,0 +1,65 @@
+# Home Assistant integration quality scale — Bronze, self-assessed.
+#
+# This is a custom integration distributed through HACS, not a core integration, so
+# nothing validates this file automatically: hassfest grades core integrations only.
+# It is kept honest by hand and by tests/test_metadata.py. A rule is `done` only if
+# the code already satisfies it; anything that cannot honestly be marked done stays
+# visible rather than being quietly upgraded.
+rules:
+  # ── Setup and runtime ───────────────────────────────────────────────────────
+  action-setup: done
+  appropriate-polling:
+    status: done
+    comment: >-
+      Polls every 6 hours. Coolblue publishes a day's readings once, at an hour that
+      varies, so there is nothing volatile to track — the interval bounds how long a
+      published day stays missing. Publication lag is covered separately by the retry
+      days, re-fetched on every poll in case they were still empty when last tried.
+  common-modules:
+    status: done
+    comment: >-
+      The coordinator lives in coordinator.py. There is no entity.py because the
+      integration creates no entities.
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # ── Documentation ───────────────────────────────────────────────────────────
+  # The documentation is README.md. A custom integration has no page on the Home
+  # Assistant website, so the README is what a user actually reads.
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-conditions:
+    status: exempt
+    comment: This integration provides no conditions.
+  docs-triggers:
+    status: exempt
+    comment: This integration provides no triggers.
+
+  # ── Entities ────────────────────────────────────────────────────────────────
+  # One fact, recorded three times because the scale asks three times: see
+  # docs/adr/0001-statistics-only-no-entities.md. The integration's entire output
+  # is external statistics written straight into the recorder.
+  entity-event-setup:
+    status: exempt
+    comment: This integration does not create its own entities.
+  entity-unique-id:
+    status: exempt
+    comment: This integration does not create its own entities.
+  has-entity-name:
+    status: exempt
+    comment: This integration does not create its own entities.
+
+  # ── Core-only ───────────────────────────────────────────────────────────────
+  brands:
+    status: exempt
+    comment: >-
+      Branding assets live in the central home-assistant/brands repository, which
+      serves core integrations. This one is distributed through HACS and ships its
+      own icon and logo in custom_components/coolblue_energy/brand/.

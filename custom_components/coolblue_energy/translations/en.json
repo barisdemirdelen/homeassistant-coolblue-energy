@@ -7,13 +7,20 @@
         "data": {
           "email": "Email address",
           "password": "Password"
+        },
+        "data_description": {
+          "email": "The email address of your Coolblue webshop account — the same one you use on coolblue.nl, not something specific to energy.",
+          "password": "The password of that same Coolblue account. It is stored so the integration can log in again on every poll."
         }
       },
       "reauth_confirm": {
         "title": "Re-authenticate Coolblue Energy",
-        "description": "Your session has expired. Please re-enter your password.",
+        "description": "Coolblue no longer accepts the stored password. Please re-enter it.",
         "data": {
           "password": "Password"
+        },
+        "data_description": {
+          "password": "The current password of your Coolblue account {email}."
         }
       }
     },
@@ -32,8 +39,8 @@
       "description": "Force a full reimport of hourly electricity and gas statistics from the Coolblue Energy API starting from the given date up to and including yesterday. Existing recorder data for the range is overwritten and cumulative sums are recalculated, which fixes gaps, negative spikes, or other artefacts in the Energy Dashboard.",
       "fields": {
         "config_entry_id": {
-          "name": "Account",
-          "description": "Which Coolblue Energy account to reimport. Leave empty to reimport all configured accounts."
+          "name": "Debtor",
+          "description": "Which Coolblue Energy debtor to reimport. Required: a reimport overwrites stored history, so it always names the debtor it acts on."
         },
         "start_date": {
           "name": "Start date",

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from unittest.mock import MagicMock, patch
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
-
-from custom_components.coolblue_energy.ha_external_statistics import (
-    external_statistic as _ext_stat_mod,
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.components.recorder.common import (
+    async_wait_recording_done,
 )
+
 from custom_components.coolblue_energy.ha_external_statistics.external_statistic import (
     ExternalStatistic,
 )
 
-_STAT_PATH = f"{_ext_stat_mod.__name__}.async_add_external_statistics"
+from .conftest import async_stat_rows
 
 # ---------------------------------------------------------------------------
 # Minimal entry type used across all tests
@@ -32,6 +32,8 @@ class Entry:
 
 
 _DATE = date(2024, 3, 15)
+_DATE_START = datetime(2024, 3, 15, 0, 0, tzinfo=UTC)
+_NEXT_DAY = _DATE_START + timedelta(days=1)
 
 
 def _ts(entry: Entry, for_date: date) -> datetime:
@@ -151,43 +153,51 @@ class TestBuildStatData:
 
 
 class TestInject:
-    def _hass(self):
-        return MagicMock()
+    """``inject`` writes through to the recorder attached to the given hass."""
 
-    def test_inject_calls_async_add_external_statistics(self):
+    async def test_inject_stores_statistics_on_the_recorder(
+        self, recorder_mock: None, hass: HomeAssistant
+    ) -> None:
         stat = _make_stat()
-        hass = self._hass()
         entries = [Entry(0, 1.0), Entry(1, 2.0)]
 
-        with patch(_STAT_PATH) as mock_add:
-            end_sum = stat.inject(hass, entries, _DATE, seed_sum=0.0)
+        end_sum = stat.inject(hass, entries, _DATE, seed_sum=0.0)
+        await async_wait_recording_done(hass)
 
-        mock_add.assert_called_once()
-        call_args = mock_add.call_args
-        assert call_args[0][0] is hass
-        assert call_args[0][1]["statistic_id"] == "test_domain:test_stat"
-        assert len(call_args[0][2]) == 2
+        rows = await async_stat_rows(
+            hass, "test_domain:test_stat", _DATE_START, _NEXT_DAY
+        )
+        assert len(rows) == 2
+        assert rows[-1]["sum"] == pytest.approx(3.0)
         assert end_sum == pytest.approx(3.0)
 
-    def test_inject_skips_empty_entries(self):
+    async def test_inject_skips_empty_entries(
+        self, recorder_mock: None, hass: HomeAssistant
+    ) -> None:
         stat = _make_stat()
-        hass = self._hass()
 
-        with patch(_STAT_PATH) as mock_add:
-            end_sum = stat.inject(hass, [], _DATE, seed_sum=7.0)
+        end_sum = stat.inject(hass, [], _DATE, seed_sum=7.0)
+        await async_wait_recording_done(hass)
 
-        mock_add.assert_not_called()
+        rows = await async_stat_rows(
+            hass, "test_domain:test_stat", _DATE_START, _NEXT_DAY
+        )
+        assert rows == []
         assert end_sum == pytest.approx(7.0)
 
-    def test_inject_returns_end_sum(self):
+    async def test_inject_returns_end_sum(
+        self, recorder_mock: None, hass: HomeAssistant
+    ) -> None:
         stat = _make_stat()
-        hass = self._hass()
-        entries = [Entry(0, 10.0)]
 
-        with patch(_STAT_PATH):
-            end_sum = stat.inject(hass, entries, _DATE, seed_sum=5.0)
+        end_sum = stat.inject(hass, [Entry(0, 10.0)], _DATE, seed_sum=5.0)
+        await async_wait_recording_done(hass)
 
+        rows = await async_stat_rows(
+            hass, "test_domain:test_stat", _DATE_START, _NEXT_DAY
+        )
         assert end_sum == pytest.approx(15.0)
+        assert rows[-1]["sum"] == pytest.approx(15.0)
 
 
 # ---------------------------------------------------------------------------

@@ -8,11 +8,11 @@ reimport_statistics:
     other artefacts in the Energy dashboard.
   fields:
     config_entry_id:
-      name: Account
+      name: Debtor
       description: >
-        Which Coolblue Energy account to reimport. Leave empty to reimport all
-        configured accounts.
-      required: false
+        Which Coolblue Energy debtor to reimport. Required: a reimport
+        overwrites stored history, so it always names the debtor it acts on.
+      required: true
       selector:
         config_entry:
           integration: coolblue_energy

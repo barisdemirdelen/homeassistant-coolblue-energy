@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.coolblue_energy.const import (
+    CONF_DEBTOR_ID,
+    CONF_LOCATION_ID,
+    DEFAULT_NAME,
+    DOMAIN,
+)
+from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
 from custom_components.coolblue_energy.model import (
     AmountData,
     ElectricityData,
@@ -27,6 +37,13 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 # The account every test acts on: one debtor, one metered location.
 DEBTOR_ID = "00844083"
 LOCATION_ID = "3addb383-a979-40b4-8487-0f3bc0854da5"
+
+ENTRY_DATA = {
+    CONF_EMAIL: "user@example.com",
+    CONF_PASSWORD: "hunter2",
+    CONF_DEBTOR_ID: DEBTOR_ID,
+    CONF_LOCATION_ID: LOCATION_ID,
+}
 
 _FAKE_DATE = "2026-01-01"
 
@@ -159,59 +176,27 @@ def mock_api_client(fake_electricity, fake_gas, fake_costs) -> AsyncMock:
 
 
 @pytest.fixture
-def mock_hass() -> MagicMock:
-    """Minimal mock HomeAssistant: async_add_executor_job calls the lambda."""
-    hass = MagicMock()
-
-    async def executor_job(fn, *args):
-        return fn(*args) if args else fn()
-
-    hass.async_add_executor_job = executor_job
-
-    # get_instance(hass) must return a recorder-like object with the same
-    # executor so async_get_last_sum works in tests.
-    mock_recorder = MagicMock()
-    mock_recorder.async_add_executor_job = executor_job
-    hass._mock_recorder = mock_recorder  # keep a reference for patching
-
-    return hass
-
-
-@pytest.fixture(autouse=True)
-def patch_get_instance(mock_hass):
-    """Patch coordinator.get_instance to return mock_hass._mock_recorder."""
-    from unittest.mock import patch
-
-    with patch(
-        "custom_components.coolblue_energy.ha_external_statistics.recorder.get_instance",
-        return_value=mock_hass._mock_recorder,
-    ):
-        yield
+def config_entry() -> MockConfigEntry:
+    """A Coolblue Energy config entry with credentials already resolved."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title=f"{DEFAULT_NAME} (debtor {DEBTOR_ID})",
+        data=ENTRY_DATA,
+        unique_id=DEBTOR_ID,
+    )
 
 
 @pytest.fixture
-def coordinator(mock_hass, mock_api_client):
-    """
-    CoolblueCoordinator with the HA DataUpdateCoordinator infrastructure
-    bypassed via ``object.__new__``.
-    """
-    from unittest.mock import MagicMock
+def coordinator(
+    recorder_mock: None,
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    mock_api_client: AsyncMock,
+) -> CoolblueCoordinator:
+    """A real ``CoolblueCoordinator`` on a real Home Assistant, backed by a real recorder.
 
-    from custom_components.coolblue_energy.const import BACKFILL_DAYS, RETRY_DAYS
-    from custom_components.coolblue_energy.coordinator import (
-        CoolblueCoordinator,
-        CoordinatorData,
-    )
-
-    coord = object.__new__(CoolblueCoordinator)
-    coord.hass = mock_hass
-    coord._client = mock_api_client
-    coord._debtor_id = "00844083"
-    coord._location_id = "3addb383-a979-40b4-8487-0f3bc0854da5"
-    coord._backfill_days = BACKFILL_DAYS
-    coord._retry_days = RETRY_DAYS
-    coord._stats_backfilled = False
-    coord._last_data = CoordinatorData(electricity=[], gas=[])
-    # HA DataUpdateCoordinator methods not available without full __init__
-    coord.async_set_updated_data = MagicMock()
-    return coord
+    ``recorder_mock`` must be requested before anything that reads statistics:
+    it is what makes ``get_instance(hass)`` resolve to a running recorder.
+    """
+    config_entry.add_to_hass(hass)
+    return CoolblueCoordinator(hass, config_entry, mock_api_client)
