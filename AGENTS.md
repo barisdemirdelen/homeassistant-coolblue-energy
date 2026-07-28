@@ -48,14 +48,16 @@ Notes:
   `PYI`, `C4`, `YTT`, …). There is deliberately no `[tool.ruff]` config — defaults apply, and
   the repo is **clean at baseline**. Any diagnostic is yours; fix it rather than adding
   `# noqa` or a config exemption.
-- **`ruff format`** — the repo *is* uniformly formatted. Format files you touched
-  (`uv run ruff format path/to/file.py`) and keep `uv run ruff format --check .` green.
+- **`ruff format`** — the repo *is* uniformly formatted, and `.` covers more than `.py`: ruff
+  also formats Python fenced blocks inside Markdown, so `docs/**.md` is in scope and a doc
+  being reformatted is expected, not collateral damage. Format what you touched
+  (`uv run ruff format path/to/file`) and keep `uv run ruff format --check .` green.
 - **dates** — never call `date.today()` / `datetime.now()` bare (`DTZ` rules). Use
   `homeassistant.util.dt` (`from homeassistant.util import dt as dt_util`), e.g.
   `dt_util.now().date()`, so the HA-configured timezone is respected. This applies in tests too.
 - **`ty`** — Astral's type checker, currently green across the repo. Keep it green; a `ty`
   error in code you touched is a blocker.
-- **`pytest`** — 136 tests, ~4s. Config in `pytest.ini`: `testpaths = tests`,
+- **`pytest`** — whole suite runs in seconds. Config in `pytest.ini`: `testpaths = tests`,
   `asyncio_mode = auto` (async tests need no `@pytest.mark.asyncio`). Narrow with
   `uv run pytest tests/test_coordinator.py -k some_case`. Coverage via `pytest-cov`:
   `uv run pytest --cov=custom_components/coolblue_energy`.
@@ -70,7 +72,7 @@ a suite against imagined behavior.
 uv run pytest tests/test_coordinator.py -k my_new_case   # red: confirm it fails
 # ...implement...
 uv run pytest tests/test_coordinator.py -k my_new_case   # green
-uv run pytest                                            # full suite, ~4s
+uv run pytest                                            # full suite
 ```
 
 For a bug fix, the failing test must reproduce the reported bug *before* the fix — a test
@@ -119,8 +121,8 @@ them.
 
 Version bumps are manual and must land in **both** places, in the same commit, with the same
 value: `version` in `pyproject.toml` and `version` in
-`custom_components/coolblue_energy/manifest.json` (both currently `1.1.2`). The release
-workflow re-stamps `manifest.json` from the GitHub release tag and **fails the release** if
+`custom_components/coolblue_energy/manifest.json`. The release workflow re-stamps
+`manifest.json` from the GitHub release tag and **fails the release** if
 the committed value doesn't match, so a bump that misses one file breaks publishing.
 
 ## Housekeeping
@@ -142,5 +144,5 @@ The five canonical roles, each label string equal to its name. See
 
 ### Domain docs
 
-Single-context — `CONTEXT.md` + `docs/adr/` at the repo root (neither exists yet; skills
-create them lazily). See `docs/agents/domain.md`.
+Single-context — `CONTEXT.md` (glossary) and `docs/adr/` at the repo root, both of which
+exist. See `docs/agents/domain.md`.

@@ -546,11 +546,10 @@ This rule *does* have a validator, and it is unconditional on entities. From
 [`script/hassfest/quality_scale_validation/runtime_data.py`](https://github.com/home-assistant/core/blob/504fddd216b0dee295a58217037a32b7e8d2a166/script/hassfest/quality_scale_validation/runtime_data.py):
 
 ```python
-    if not _sets_runtime_data(async_setup_entry, config_entry_argument):
-        errors.append(
-            "Integration does not set entry.runtime_data in async_setup_entry"
-            f"({init_file})"
-        )
+if not _sets_runtime_data(async_setup_entry, config_entry_argument):
+    errors.append(
+        f"Integration does not set entry.runtime_data in async_setup_entry({init_file})"
+    )
 ```
 
 The rule page says:
