@@ -89,24 +89,29 @@ Test at the existing seams, one file per seam:
 
 Assert on observable behavior at those boundaries, not on private helpers or internal call
 order. Fixtures and entry factories live in `tests/conftest.py` (`make_electricity_entry`,
-`make_day_gas`, `mock_api_client`, `mock_hass`, `coordinator`, …) — build test data from
+`make_day_gas`, `mock_api_client`, `coordinator`, …) — build test data from
 those helpers instead of hand-rolling `MeterReadingEntry` literals, and add new factories
 there rather than duplicating setup per test.
 
 ### Two harnesses, temporarily
 
-Most of the suite runs against `mock_hass`, a hand-rolled `MagicMock` Home Assistant, plus an
-autouse `patch_get_instance` fixture that fakes the recorder. `tests/test_config_entry.py`
-runs against a **real** Home Assistant via `pytest-homeassistant-custom-component`
-(dev-group only — never add it to `manifest.json`, it must not reach a user's install).
+`tests/conftest.py` hands out a **real** Home Assistant via
+`pytest-homeassistant-custom-component` (dev-group only — never add it to `manifest.json`, it
+must not reach a user's install). The `coordinator` fixture is a real `CoolblueCoordinator`
+on a real `hass` with a real recorder behind it, so `get_instance(hass)` resolves to
+something that actually queries statistics.
 
-The real harness is where new tests go; the mock one is being migrated away. Two rules when
-writing against it:
+What remains on hand-rolled mocks is `tests/ha_external_statistics/`, which builds local
+`MagicMock` hass objects per test and patches `get_instance` itself. Those are being migrated
+away; the real harness is where new tests go.
 
-- Request `recorder_mock` **before** `enable_custom_integrations` in the test signature. The
-  integration declares a `recorder` dependency and the plugin asserts this ordering.
-- Shadow the autouse `patch_get_instance` fixture with a no-op at module level, so
-  `get_instance` resolves to the recorder `recorder_mock` started.
+One rule when writing against it: request `recorder_mock` **before**
+`enable_custom_integrations` in the test signature. The integration declares a `recorder`
+dependency and the plugin asserts this ordering.
+
+Spy on a real coordinator method rather than replacing it — `_spy_on` in
+`tests/test_coordinator.py` wraps the bound method so the call still does its work while the
+test counts it.
 
 The plugin pins an exact Home Assistant version, so `homeassistant` and
 `pytest-homeassistant-custom-component` must be bumped in lockstep.

@@ -31,16 +31,6 @@ ENTRY_DATA = {
 }
 
 
-@pytest.fixture(autouse=True)
-def patch_get_instance():
-    """Neutralise the mock-harness recorder patch from ``conftest``.
-
-    Tests in this module run against the recorder the ``recorder_mock`` fixture
-    starts, so ``get_instance`` must resolve to that instance.
-    """
-    return
-
-
 @pytest.fixture
 def config_entry() -> MockConfigEntry:
     """A Coolblue Energy config entry with credentials already resolved."""
