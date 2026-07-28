@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -39,12 +39,12 @@ class Entry:
 
 
 _DATE = date(2024, 3, 15)
-_DAY_START = datetime(2024, 3, 15, 0, 0, tzinfo=timezone.utc)
+_DAY_START = datetime(2024, 3, 15, 0, 0, tzinfo=UTC)
 
 
 def _ts(entry: Entry, for_date: date) -> datetime:
     return datetime(
-        for_date.year, for_date.month, for_date.day, entry.hour, 0, tzinfo=timezone.utc
+        for_date.year, for_date.month, for_date.day, entry.hour, 0, tzinfo=UTC
     )
 
 
@@ -107,17 +107,19 @@ class TestAsyncGetLastSum:
     @pytest.mark.asyncio
     async def test_query_window_uses_lookback_hours(self):
         hass = MagicMock()
-        before_dt = datetime(2024, 3, 15, 0, 0, tzinfo=timezone.utc)
+        before_dt = datetime(2024, 3, 15, 0, 0, tzinfo=UTC)
         recorder_instance = MagicMock()
         # Invoke the lambda so statistics_during_period is actually called
         recorder_instance.async_add_executor_job = AsyncMock(
             side_effect=lambda fn: fn()
         )
 
-        with patch(_GET_INSTANCE_PATH, return_value=recorder_instance):
-            with patch(_SDP_PATH) as mock_sdp:
-                mock_sdp.return_value = {}
-                await async_get_last_sum(hass, "dom:stat", before_dt, lookback_hours=10)
+        with (
+            patch(_GET_INSTANCE_PATH, return_value=recorder_instance),
+            patch(_SDP_PATH) as mock_sdp,
+        ):
+            mock_sdp.return_value = {}
+            await async_get_last_sum(hass, "dom:stat", before_dt, lookback_hours=10)
 
         assert mock_sdp.call_args[0][1] == before_dt - timedelta(hours=10)
         assert mock_sdp.call_args[0][2] == before_dt
@@ -125,16 +127,18 @@ class TestAsyncGetLastSum:
     @pytest.mark.asyncio
     async def test_default_lookback_is_25_hours(self):
         hass = MagicMock()
-        before_dt = datetime(2024, 3, 15, 0, 0, tzinfo=timezone.utc)
+        before_dt = datetime(2024, 3, 15, 0, 0, tzinfo=UTC)
         recorder_instance = MagicMock()
         recorder_instance.async_add_executor_job = AsyncMock(
             side_effect=lambda fn: fn()
         )
 
-        with patch(_GET_INSTANCE_PATH, return_value=recorder_instance):
-            with patch(_SDP_PATH) as mock_sdp:
-                mock_sdp.return_value = {}
-                await async_get_last_sum(hass, "dom:stat", before_dt)
+        with (
+            patch(_GET_INSTANCE_PATH, return_value=recorder_instance),
+            patch(_SDP_PATH) as mock_sdp,
+        ):
+            mock_sdp.return_value = {}
+            await async_get_last_sum(hass, "dom:stat", before_dt)
 
         assert mock_sdp.call_args[0][1] == before_dt - timedelta(hours=25)
 
@@ -170,11 +174,13 @@ class TestAsyncInjectDay:
             return_value={"dom:a": [{"sum": 50.0}]}
         )
 
-        with patch(_GET_INSTANCE_PATH, return_value=recorder_instance):
-            with patch(_ADD_STAT_PATH):
-                result = await async_inject_day(
-                    hass, [(stat, entries)], _DATE, _DAY_START, None
-                )
+        with (
+            patch(_GET_INSTANCE_PATH, return_value=recorder_instance),
+            patch(_ADD_STAT_PATH),
+        ):
+            result = await async_inject_day(
+                hass, [(stat, entries)], _DATE, _DAY_START, None
+            )
 
         assert result["dom:a"] == pytest.approx(53.0)
 
@@ -225,15 +231,17 @@ class TestAsyncInjectDay:
             return_value={"dom:b": [{"sum": 7.0}]}
         )
 
-        with patch(_GET_INSTANCE_PATH, return_value=recorder_instance):
-            with patch(_ADD_STAT_PATH):
-                result = await async_inject_day(
-                    hass,
-                    [(stat_a, [Entry(0, 1.0)]), (stat_b, [Entry(0, 2.0)])],
-                    _DATE,
-                    _DAY_START,
-                    seed_sums={"dom:a": 5.0},  # dom:b absent → DB lookup
-                )
+        with (
+            patch(_GET_INSTANCE_PATH, return_value=recorder_instance),
+            patch(_ADD_STAT_PATH),
+        ):
+            result = await async_inject_day(
+                hass,
+                [(stat_a, [Entry(0, 1.0)]), (stat_b, [Entry(0, 2.0)])],
+                _DATE,
+                _DAY_START,
+                seed_sums={"dom:a": 5.0},  # dom:b absent → DB lookup
+            )
 
         assert result["dom:a"] == pytest.approx(6.0)
         assert result["dom:b"] == pytest.approx(9.0)

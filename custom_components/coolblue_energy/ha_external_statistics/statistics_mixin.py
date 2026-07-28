@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from datetime import date, timedelta
 
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class StatisticsLoopMixin(ABC):
     @staticmethod
     def _today() -> date:
         """Return today's date. Exists as a method so tests can override it."""
-        return date.today()
+        return dt_util.now().date()
 
     # ── Abstract interface ───────────────────────────────────────────────────
 
@@ -75,12 +76,18 @@ class StatisticsLoopMixin(ABC):
         """
         try:
             if not self._stats_backfilled:
-                _LOGGER.debug("Starting initial backfill of the last %d days.", self._backfill_days)
+                _LOGGER.debug(
+                    "Starting initial backfill of the last %d days.",
+                    self._backfill_days,
+                )
                 await self._async_backfill(self._backfill_days)
                 self._stats_backfilled = True
                 _LOGGER.debug("Initial backfill complete.")
             else:
-                _LOGGER.debug("Running scheduled statistics update (retrying last %d days).", self._retry_days)
+                _LOGGER.debug(
+                    "Running scheduled statistics update (retrying last %d days).",
+                    self._retry_days,
+                )
                 await self._async_retry_recent_days(self._retry_days)
                 _LOGGER.debug("Scheduled statistics update complete.")
         except UpdateFailed:

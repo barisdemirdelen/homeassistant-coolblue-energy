@@ -25,7 +25,7 @@ from datetime import date
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .api_client import ApiClient
+from .api_client import API_ERRORS, ApiClient
 from .const import (
     BACKFILL_DAYS,
     DOMAIN,
@@ -118,7 +118,10 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
         self._last_data = CoordinatorData(electricity=electricity, gas=gas)
         _LOGGER.debug(
             "Fetched %s: %d electricity, %d gas, %d costs entries.",
-            day, len(electricity), len(gas), len(costs),
+            day,
+            len(electricity),
+            len(gas),
+            len(costs),
         )
         return await self._inject_statistics(electricity, gas, costs, day, seed_sums)
 
@@ -126,7 +129,9 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
 
     async def _fetch_day(
         self, day: date
-    ) -> tuple[list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]]:
+    ) -> tuple[
+        list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]
+    ]:
         """Fetch hourly electricity, gas, and costs data for *day* from the API."""
         electricity: list[MeterReadingEntry] = []
         gas: list[MeterReadingEntry] = []
@@ -144,7 +149,7 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
                     for_date=day,
                 )
             )
-        except Exception as exc:
+        except API_ERRORS as exc:
             electricity_exception = exc
             _LOGGER.debug("Could not fetch electricity data for %s: %s", day, exc)
 
@@ -157,7 +162,7 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
                     for_date=day,
                 )
             )
-        except Exception as exc:
+        except API_ERRORS as exc:
             gas_exception = exc
             _LOGGER.debug("Could not fetch gas data for %s: %s", day, exc)
 
@@ -170,11 +175,15 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
                     for_date=day,
                 )
             )
-        except Exception as exc:
+        except API_ERRORS as exc:
             costs_exception = exc
             _LOGGER.debug("Could not fetch costs data for %s: %s", day, exc)
 
-        if electricity_exception is not None and gas_exception is not None and costs_exception is not None:
+        if (
+            electricity_exception is not None
+            and gas_exception is not None
+            and costs_exception is not None
+        ):
             raise electricity_exception
 
         return electricity, gas, costs

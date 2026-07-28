@@ -15,9 +15,9 @@ shared across any HA custom integration that writes external statistics.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Callable, Generic, TypeVar
 
 from homeassistant.components.recorder.statistics import (
     StatisticData,
@@ -29,11 +29,9 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
 
 @dataclass(frozen=True)
-class ExternalStatistic(Generic[T]):
+class ExternalStatistic[T]:
     """
     A single HA external statistic — metadata and injection logic bundled together.
 

@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import re
+from typing import Self
 
 import aiohttp
 from pydantic import TypeAdapter
@@ -35,6 +36,17 @@ _MeterReadingList = TypeAdapter(list[MeterReadingEntry])
 # ── Module-level constants ────────────────────────────────────────────────────
 
 ENERGY_URL = "https://www.coolblue.nl/nl/mijn-coolblue-account/energie/energieverbruik"
+
+#: Closed set of exceptions the public ``ApiClient`` methods raise on failure:
+#: transport errors and timeouts from aiohttp, plus the ``RuntimeError`` /
+#: ``ValueError`` that ``_retry_with_backoff`` re-raises for deterministic
+#: parse/contract failures. Callers catch this instead of a blind ``Exception``.
+API_ERRORS: tuple[type[Exception], ...] = (
+    aiohttp.ClientError,
+    TimeoutError,
+    RuntimeError,
+    ValueError,
+)
 
 # URL-encoded next-router-state-tree for the energy-usage page
 # (derived from observed browser traffic; update if the route structure changes)
@@ -152,7 +164,7 @@ class ApiClient:
                     exc.status,
                     delay,
                 )
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 last_exc = exc
                 logger.warning(
                     "%s attempt %d timed out, retrying in %.1fs ...",
@@ -201,7 +213,7 @@ class ApiClient:
                         return {}
                     text = await r.text()
                     return {fn: aid for aid, fn in _SERVER_ACTION_RE.findall(text)}
-            except Exception as err:
+            except (aiohttp.ClientError, TimeoutError, UnicodeDecodeError) as err:
                 logger.warning("Could not fetch chunk %s: %s", url, err)
                 return {}
 
@@ -342,7 +354,7 @@ class ApiClient:
         """Close the underlying HTTP session."""
         await self._auth.close()
 
-    async def __aenter__(self) -> ApiClient:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_: object) -> None:
