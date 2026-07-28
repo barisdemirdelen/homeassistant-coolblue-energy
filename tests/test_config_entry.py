@@ -169,6 +169,27 @@ async def test_rejected_credentials_at_setup_ask_for_a_new_password(
     assert _reauth_flows(hass, config_entry)
 
 
+async def test_connection_failure_at_setup_leaves_the_entry_awaiting_retry(
+    recorder_mock: None,
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    mock_api_client: AsyncMock,
+) -> None:
+    """A Coolblue outage at setup is transient: Home Assistant retries it itself."""
+    config_entry.add_to_hass(hass)
+    mock_api_client.get_hourly_energy.side_effect = aiohttp.ClientError("unreachable")
+
+    with patch(
+        "custom_components.coolblue_energy.ApiClient", return_value=mock_api_client
+    ):
+        assert not await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+    assert not _reauth_flows(hass, config_entry)
+
+
 async def test_rejected_credentials_while_polling_ask_for_a_new_password(
     recorder_mock: None,
     enable_custom_integrations: None,

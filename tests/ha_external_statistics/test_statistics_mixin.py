@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable
 from datetime import date, timedelta
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.coolblue_energy.ha_external_statistics.statistics_mixin import (
     StatisticsLoopMixin,
@@ -146,6 +148,38 @@ class TestProcessDayRange:
         )
 
     @pytest.mark.asyncio
+    async def test_a_skipped_day_is_reported_once_for_the_whole_range(self, caplog):
+        """One line naming the days, not a traceback each — an outage is not news."""
+        mixin = _FakeMixin()
+        mixin.process_day = AsyncMock(
+            side_effect=[RuntimeError("HTTP 500"), None, RuntimeError("HTTP 500")]
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await mixin._async_process_day_range(
+                [date(2026, 3, 25), date(2026, 3, 26), date(2026, 3, 27)]
+            )
+
+        assert len(caplog.records) == 1
+        assert "2026-03-25" in caplog.text
+        assert "2026-03-27" in caplog.text
+        assert "2026-03-26" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_an_escalated_range_logs_nothing_itself(self, caplog):
+        """The caller reports a total failure; logging it here would duplicate it."""
+        mixin = _FakeMixin()
+        mixin.process_day = AsyncMock(side_effect=RuntimeError("HTTP 500"))
+
+        with caplog.at_level(logging.WARNING), pytest.raises(RuntimeError):
+            await mixin._async_process_day_range(
+                [date(2026, 3, 26), date(2026, 3, 27)],
+                raise_if_all_fail=True,
+            )
+
+        assert caplog.records == []
+
+    @pytest.mark.asyncio
     async def test_empty_day_list_is_a_no_op(self):
         mixin = _FakeMixin()
         await mixin._async_process_day_range([])
@@ -191,12 +225,12 @@ class TestBackfill:
         assert len(processed) == 2
 
     @pytest.mark.asyncio
-    async def test_all_days_fail_does_not_raise(self):
-        """Backfill swallows all errors silently — it is best-effort."""
+    async def test_all_days_fail_raises(self):
+        """A backfill that imported nothing is a failure, not a quiet empty start."""
         mixin = _FakeMixin(backfill_days=3)
         mixin.process_day = AsyncMock(side_effect=RuntimeError("HTTP 500"))
-        with _patch_today():
-            await mixin._async_backfill(3)  # must not raise
+        with _patch_today(), pytest.raises(RuntimeError, match="HTTP 500"):
+            await mixin._async_backfill(3)
 
 
 # ---------------------------------------------------------------------------
@@ -255,12 +289,23 @@ class TestRunStatisticsUpdate:
         assert mixin.process_day.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_500_during_backfill_does_not_raise_and_sets_flag(self):
-        """Backfill errors must not surface — the flag is still set."""
+    async def test_total_backfill_failure_is_an_update_failure(self):
+        """Nothing imported is an update failure, and the backfill stays pending."""
         mixin = _FakeMixin(backfill_days=3)
         mixin.process_day = AsyncMock(side_effect=RuntimeError("HTTP 500"))
+        with _patch_today(), pytest.raises(UpdateFailed):
+            await mixin.async_run_statistics_update()
+        assert mixin._stats_backfilled is False
+
+    @pytest.mark.asyncio
+    async def test_partial_backfill_failure_still_completes(self):
+        """One unavailable day does not hold up a backfill that imported the rest."""
+        mixin = _FakeMixin(backfill_days=3)
+        mixin.process_day = AsyncMock(
+            side_effect=[RuntimeError("HTTP 500"), None, None]
+        )
         with _patch_today():
-            await mixin.async_run_statistics_update()  # must not raise
+            await mixin.async_run_statistics_update()
         assert mixin._stats_backfilled is True
 
 

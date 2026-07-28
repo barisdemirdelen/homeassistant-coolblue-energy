@@ -73,6 +73,11 @@ class StatisticsLoopMixin(ABC):
         On subsequent calls: retry the last ``_retry_days`` days to pick up
         late-published data.
 
+        A cycle that imports nothing at all raises, so the caller can retry
+        instead of carrying on with no data. The backfill is only marked done
+        once it has run, which leaves the whole window to be re-attempted after
+        a failure rather than narrowing to the retry days.
+
         An authentication failure is not an update failure: it propagates
         untouched so Home Assistant can ask the user for new credentials.
         Anything else unhandled is raised as ``UpdateFailed``.
@@ -119,8 +124,15 @@ class StatisticsLoopMixin(ABC):
         exception, the last exception is re-raised. An authentication failure
         stops the loop outright — no later day can succeed with credentials the
         service has already refused.
+
+        A skipped day is reported once per range, not once per day: an outage
+        fails every day in the range, and a traceback each would bury the one
+        line that says what happened. The per-day detail stays at debug. When
+        the range escalates instead, the caller reports it and this logs
+        nothing.
         """
         seed_sums: dict[str, float] | None = None
+        skipped: list[date] = []
         any_success = False
         last_exc: Exception | None = None
 
@@ -134,7 +146,7 @@ class StatisticsLoopMixin(ABC):
             except ConfigEntryAuthFailed:
                 raise
             except Exception as exc:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "Failed to fetch data for %s, skipping.", day, exc_info=True
                 )
                 # Do NOT reset seed_sums here.  Resetting to None would cause
@@ -142,10 +154,20 @@ class StatisticsLoopMixin(ABC):
                 # produce a large negative spike in the statistics graph.
                 # Preserving the last-successful seed is equivalent to treating
                 # the failed day as having zero consumption.
+                skipped.append(day)
                 last_exc = exc
 
         if raise_if_all_fail and not any_success and last_exc is not None:
             raise last_exc
+
+        if skipped:
+            _LOGGER.warning(
+                "Skipped %d of %d days (%s): %s",
+                len(skipped),
+                len(days),
+                ", ".join(str(day) for day in skipped),
+                last_exc,
+            )
 
     # ── Scheduling helpers ───────────────────────────────────────────────────
 
@@ -156,10 +178,15 @@ class StatisticsLoopMixin(ABC):
         await self._async_process_day_range(day_range, raise_if_all_fail=True)
 
     async def _async_backfill(self, days: int) -> None:
-        """Process the last *days* calendar days, silently skipping failures."""
+        """Process the last *days* calendar days, raising if all of them fail.
+
+        A single unavailable day is skipped — a partially published history is
+        normal. Every day failing means the service is unreachable, and the
+        caller needs to hear that: the backfill has imported nothing at all.
+        """
         today = self._today()
         day_range = [today - timedelta(days=offset) for offset in range(days, 0, -1)]
-        await self._async_process_day_range(day_range)
+        await self._async_process_day_range(day_range, raise_if_all_fail=True)
 
     async def async_reimport_statistics(self, start_date: date) -> None:
         """Reimport all statistics from *start_date* through yesterday (inclusive)."""

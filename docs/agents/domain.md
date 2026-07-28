@@ -17,12 +17,11 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   ├── 0001-statistics-as-the-write-model.md
-│   └── 0002-coordinator-owns-backfill.md
+│   └── 0001-statistics-only-no-entities.md
 └── custom_components/coolblue_energy/
 ```
 
-Neither `CONTEXT.md` nor `docs/adr/` exists yet — that is expected. This repo is a single Python package, so there is no `CONTEXT-MAP.md` and no per-context ADR directories.
+This repo is a single Python package, so there is no `CONTEXT-MAP.md` and no per-context ADR directories.
 
 ## Use the glossary's vocabulary
 
