@@ -46,7 +46,7 @@ class CoolblueConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(debtor_id)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=DEFAULT_NAME,
+                    title=f"{DEFAULT_NAME} (debtor {debtor_id})",
                     data={
                         CONF_EMAIL: user_input[CONF_EMAIL],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],

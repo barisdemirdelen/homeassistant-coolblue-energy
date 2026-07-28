@@ -2,7 +2,8 @@
 test_config_flow.py
 
 Tests for CoolblueConfigFlow._try_connect — the static method that validates
-credentials against the live API.  All network calls are mocked.
+credentials against the live API — and for the entry the user step creates.
+All network calls are mocked.
 """
 
 from __future__ import annotations
@@ -10,8 +11,15 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
+from homeassistant.config_entries import SOURCE_USER
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.coolblue_energy.config_flow import CoolblueConfigFlow
+from custom_components.coolblue_energy.const import DOMAIN
+
+from .conftest import DEBTOR_ID, LOCATION_ID
 
 _PATCH = "custom_components.coolblue_energy.config_flow.ApiClient"
 
@@ -104,3 +112,33 @@ class TestTryConnect:
                 "user@test.com", "any-password"
             )
         assert err == "cannot_connect"
+
+
+async def test_user_step_titles_the_entry_with_its_debtor(
+    recorder_mock: None,
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+) -> None:
+    """The title has to tell two debtors apart wherever entries are listed.
+
+    The reimport action targets a config entry through a picker that shows
+    nothing but the entry title, and reimport overwrites stored history — so a
+    title that is the same for every debtor is how the wrong one gets picked.
+    """
+    mock_cls, _ = _mock_client(return_value=(DEBTOR_ID, LOCATION_ID))
+
+    with (
+        patch(_PATCH, mock_cls),
+        patch("custom_components.coolblue_energy.async_setup_entry", return_value=True),
+    ):
+        started = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            started["flow_id"],
+            {CONF_EMAIL: "user@example.com", CONF_PASSWORD: "hunter2"},
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert DEBTOR_ID in result["title"]

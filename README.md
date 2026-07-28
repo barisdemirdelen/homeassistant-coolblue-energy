@@ -133,12 +133,17 @@ A reimport overwrites stored history, so it always names the debtor it acts on.
 An identifier that does not resolve to a loaded debtor is rejected outright and
 nothing is reimported.
 
-**Example — reimport the last 30 days via Developer Tools → Services:**
+In **Developer Tools → Services** the debtor is a dropdown listing your entries
+by title — `Coolblue Energy (debtor 00844083)` — so there is no id to type. The
+YAML below is what that dropdown produces: `config_entry_id` is Home Assistant's
+own generated id for the entry, not your debtor number.
+
+**Example — reimport the last 30 days:**
 
 ```yaml
 service: coolblue_energy.reimport_statistics
 data:
-  config_entry_id: 01JCQ0Z6X0Y7WGT3M2C4K8V5N9
+  config_entry_id: 01KYMDY4DSC63EVMGD8J0XPPHZ
   start_date: "2026-03-05"
 ```
 

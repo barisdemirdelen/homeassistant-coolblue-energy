@@ -13,6 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.coolblue_energy.const import (
     CONF_DEBTOR_ID,
     CONF_LOCATION_ID,
+    DEFAULT_NAME,
     DOMAIN,
 )
 from custom_components.coolblue_energy.coordinator import CoolblueCoordinator
@@ -179,7 +180,7 @@ def config_entry() -> MockConfigEntry:
     """A Coolblue Energy config entry with credentials already resolved."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title="Coolblue Energy",
+        title=f"{DEFAULT_NAME} (debtor {DEBTOR_ID})",
         data=ENTRY_DATA,
         unique_id=DEBTOR_ID,
     )
