@@ -56,7 +56,7 @@ class TestParseRscResponse:
 
     def test_raises_on_no_valid_json(self):
         """Pure garbage must still raise."""
-        text = 'garbage\nmore garbage'
+        text = "garbage\nmore garbage"
         with pytest.raises(ValueError, match="Could not find payload"):
             _parse_rsc_response(text)
 
@@ -65,7 +65,6 @@ class TestParseRscResponse:
 
 
 class TestRetryOnTransientFailure:
-
     @pytest.mark.asyncio
     async def test_retries_on_server_error_then_succeeds(self):
         """502/503 should trigger retries; eventual success returns result."""
@@ -76,14 +75,13 @@ class TestRetryOnTransientFailure:
             call_count[0] += 1
             if call_count[0] < 3:
                 raise aiohttp.ClientResponseError(
-                    request_info=MagicMock(), history=(),
+                    request_info=MagicMock(),
+                    history=(),
                     status=(502 if call_count[0] == 1 else 503),
                 )
             return '{"result":"ok"}'
 
-        with patch.object(
-            client, '_next_action_post', side_effect=side_effect
-        ):
+        with patch.object(client, "_next_action_post", side_effect=side_effect):
             result = await client._retry_with_backoff(
                 fn_name="getInsights",
                 operation=lambda: client._next_action_post("action", []),
@@ -105,7 +103,7 @@ class TestRetryOnTransientFailure:
             )
 
         with (
-            patch.object(client, '_next_action_post', side_effect=always_fail),
+            patch.object(client, "_next_action_post", side_effect=always_fail),
             pytest.raises(aiohttp.ClientResponseError),
         ):
             await client._retry_with_backoff(
@@ -129,7 +127,7 @@ class TestRetryOnTransientFailure:
             )
 
         with (
-            patch.object(client, '_next_action_post', side_effect=always_403),
+            patch.object(client, "_next_action_post", side_effect=always_403),
             pytest.raises(aiohttp.ClientResponseError),
         ):
             await client._retry_with_backoff(
@@ -151,9 +149,7 @@ class TestRetryOnTransientFailure:
                 raise TimeoutError()
             return '{"recovered":true}'
 
-        with patch.object(
-            client, '_next_action_post', side_effect=timeout_then_work
-        ):
+        with patch.object(client, "_next_action_post", side_effect=timeout_then_work):
             result = await client._retry_with_backoff(
                 fn_name="getInsights",
                 operation=lambda: client._next_action_post("a", []),
@@ -167,16 +163,15 @@ class TestRetryOnTransientFailure:
 
 
 class TestEnergyIdExtractionFallback:
-
     @pytest.mark.asyncio
     async def test_falls_back_to_next_data_script(self):
         """When self.__next_f.push pattern is missing, parse __NEXT_DATA__."""
         client = ApiClient("test@test.com", "pass")
 
-        html = '''<html><body>
+        html = """<html><body>
         <script id="__NEXT_DATA__" type="application/json">
         {"props":{"pageProps":{"debtorNumber":"12345678","locationId":"deadbeef-0000-0000-0000-000000000000"}}}
-        </script></body></html>'''
+        </script></body></html>"""
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()

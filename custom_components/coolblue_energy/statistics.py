@@ -56,16 +56,15 @@ def _entry_to_utc(name: str, for_date: date) -> datetime:
     of a ``StatisticData`` point.
     """
     h, m = int(name[:2]), int(name[3:5])
-    local_dt = datetime(for_date.year, for_date.month, for_date.day, h, m,
-                        tzinfo=_TZ_NL)
+    local_dt = datetime(
+        for_date.year, for_date.month, for_date.day, h, m, tzinfo=_TZ_NL
+    )
     return local_dt.astimezone(UTC)
 
 
 def _day_start_utc(day: date) -> datetime:
     """Return the UTC datetime for midnight of *day* in Amsterdam local time."""
-    return datetime(day.year, day.month, day.day, 0, 0, tzinfo=_TZ_NL).astimezone(
-        UTC
-    )
+    return datetime(day.year, day.month, day.day, 0, 0, tzinfo=_TZ_NL).astimezone(UTC)
 
 
 def _ts(entry: MeterReadingEntry, for_date: date) -> datetime:

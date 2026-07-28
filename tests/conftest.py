@@ -70,7 +70,9 @@ def make_cost_entry(
         timestamp=_ts(hour),
         electricity=ElectricityData(cost=AmountData(amount=electricity_cost)),
         gas=GasData(cost=AmountData(amount=gas_cost)),
-        feed_in=FeedInData(cost=AmountData(amount=production_cost)) if production_cost else None,
+        feed_in=FeedInData(cost=AmountData(amount=production_cost))
+        if production_cost
+        else None,
     )
 
 
@@ -90,13 +92,19 @@ def make_day_gas(n_hours: int = 24, gas: float = 0.05) -> list[MeterReadingEntry
 
 
 def make_day_costs(
-    n_hours: int = 24, electricity_cost: float = 0.25, gas_cost: float = 0.10,
+    n_hours: int = 24,
+    electricity_cost: float = 0.25,
+    gas_cost: float = 0.10,
     production_cost: float = 0.0,
 ) -> list[MeterReadingEntry]:
     """Return *n_hours* uniform cost entries (from the 'costs' API request)."""
     return [
-        make_cost_entry(h, electricity_cost=electricity_cost, gas_cost=gas_cost,
-                        production_cost=production_cost)
+        make_cost_entry(
+            h,
+            electricity_cost=electricity_cost,
+            gas_cost=gas_cost,
+            production_cost=production_cost,
+        )
         for h in range(n_hours)
     ]
 

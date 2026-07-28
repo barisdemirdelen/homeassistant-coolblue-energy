@@ -63,7 +63,9 @@ async def async_get_last_sum(
     entries = result.get(stat_id, [])
     if entries:
         last = entries[-1]
-        raw_sum = last.get("sum") if isinstance(last, dict) else getattr(last, "sum", None)
+        raw_sum = (
+            last.get("sum") if isinstance(last, dict) else getattr(last, "sum", None)
+        )
         return float(raw_sum or 0.0)
     return 0.0
 
@@ -122,4 +124,3 @@ async def async_inject_day(
         result_sums[stat.statistic_id] = stat.inject(hass, entries, for_date, seed)
 
     return result_sums
-

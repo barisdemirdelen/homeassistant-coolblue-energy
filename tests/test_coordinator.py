@@ -268,9 +268,7 @@ class TestInjectStatistics:
                 seed_sums=_EMPTY_SEED,
             )
 
-        assert captured["first_start"] == datetime(
-            2026, 1, 13, 23, 0, tzinfo=UTC
-        )
+        assert captured["first_start"] == datetime(2026, 1, 13, 23, 0, tzinfo=UTC)
 
     async def test_statistic_data_sums_accumulate(
         self, coordinator, fake_electricity, fake_gas, fake_costs

@@ -118,7 +118,10 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
         self._last_data = CoordinatorData(electricity=electricity, gas=gas)
         _LOGGER.debug(
             "Fetched %s: %d electricity, %d gas, %d costs entries.",
-            day, len(electricity), len(gas), len(costs),
+            day,
+            len(electricity),
+            len(gas),
+            len(costs),
         )
         return await self._inject_statistics(electricity, gas, costs, day, seed_sums)
 
@@ -126,7 +129,9 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
 
     async def _fetch_day(
         self, day: date
-    ) -> tuple[list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]]:
+    ) -> tuple[
+        list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]
+    ]:
         """Fetch hourly electricity, gas, and costs data for *day* from the API."""
         electricity: list[MeterReadingEntry] = []
         gas: list[MeterReadingEntry] = []
@@ -174,7 +179,11 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
             costs_exception = exc
             _LOGGER.debug("Could not fetch costs data for %s: %s", day, exc)
 
-        if electricity_exception is not None and gas_exception is not None and costs_exception is not None:
+        if (
+            electricity_exception is not None
+            and gas_exception is not None
+            and costs_exception is not None
+        ):
             raise electricity_exception
 
         return electricity, gas, costs
