@@ -245,7 +245,8 @@ for req in missing:
     if req in self.install_failure_history:
         _LOGGER.info(
             "Multiple attempts to install %s failed, install will be"
-            " retried after next configuration check or restart", req,
+            " retried after next configuration check or restart",
+            req,
         )
         raise RequirementsNotFound(integration, [req])
 ```
@@ -299,7 +300,9 @@ in the whole pipeline, and it is core-only for the pin requirement:
 
 ```python
 if not (match := PACKAGE_REGEX.match(req)):
-    integration.add_error("requirements", f'Requirement "{req}" does not match package regex pattern')
+    integration.add_error(
+        "requirements", f'Requirement "{req}" does not match package regex pattern'
+    )
     continue
 pkg, sep, version = match.groups()
 

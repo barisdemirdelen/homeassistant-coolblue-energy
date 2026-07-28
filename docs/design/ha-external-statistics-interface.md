@@ -20,7 +20,11 @@ Five public symbols. Two of them a caller may never spell.
 
 ```python
 __all__ = [
-    "DayReadings", "ImportReport", "NothingImported", "Statistic", "StatisticsImporter",
+    "DayReadings",
+    "ImportReport",
+    "NothingImported",
+    "Statistic",
+    "StatisticsImporter",
 ]
 ```
 
@@ -57,13 +61,13 @@ partially published day, not an error.
 class ImportReport:
     """What one run did. Returned on success and on partial failure alike."""
 
-    days: tuple[date, ...]        # attempted, ascending
-    imported: tuple[date, ...]    # wrote at least one row
-    pending: tuple[date, ...]     # the utility has published nothing yet
-    failed: tuple[date, ...]      # fetch raised
+    days: tuple[date, ...]  # attempted, ascending
+    imported: tuple[date, ...]  # wrote at least one row
+    pending: tuple[date, ...]  # the utility has published nothing yet
+    failed: tuple[date, ...]  # fetch raised
     rows_written: int
-    seed_reads: int               # recorder queries issued
-    error: Exception | None       # the last fetch failure, if any
+    seed_reads: int  # recorder queries issued
+    error: Exception | None  # the last fetch failure, if any
 
     @property
     def imported_anything(self) -> bool: ...
@@ -212,9 +216,11 @@ from homeassistant.components.recorder.statistics import (
     statistics_during_period,
 )
 from homeassistant.components.recorder.models import (
-    StatisticData, StatisticMeanType, StatisticMetaData,
+    StatisticData,
+    StatisticMeanType,
+    StatisticMetaData,
 )
-from homeassistant.core import HomeAssistant            # annotation only
+from homeassistant.core import HomeAssistant  # annotation only
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util.dt import DEFAULT_TIME_ZONE
 ```

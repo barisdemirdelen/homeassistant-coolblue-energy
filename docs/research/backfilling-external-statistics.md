@@ -287,19 +287,17 @@ def _statistics_exists(
 and the update writes **every** value column, so a stale `mean`/`min`/`max` cannot survive a rewrite:
 
 ```python
-        session.query(table).filter_by(id=stat_id).update(
-            {
-                table.mean: statistic.get("mean"),
-                table.min: statistic.get("min"),
-                table.max: statistic.get("max"),
-                table.last_reset_ts: datetime_to_timestamp_or_none(
-                    statistic.get("last_reset")
-                ),
-                table.state: statistic.get("state"),
-                table.sum: statistic.get("sum"),
-            },
-            synchronize_session=False,
-        )
+session.query(table).filter_by(id=stat_id).update(
+    {
+        table.mean: statistic.get("mean"),
+        table.min: statistic.get("min"),
+        table.max: statistic.get("max"),
+        table.last_reset_ts: datetime_to_timestamp_or_none(statistic.get("last_reset")),
+        table.state: statistic.get("state"),
+        table.sum: statistic.get("sum"),
+    },
+    synchronize_session=False,
+)
 ```
 ([`statistics.py#L901-L921`](https://github.com/home-assistant/core/blob/07a2383bdc4f1a71b0b695e24cbc0c1da823f99b/homeassistant/components/recorder/statistics.py#L901-L921))
 
@@ -393,37 +391,34 @@ The core idiom is therefore *both*, in a specific order. `solaredge` states it m
 the pattern we should copy verbatim:
 
 ```python
-        current_stats = await get_instance(self.hass).async_add_executor_job(
-            statistics_during_period,
-            self.hass,
-            start,
-            start + timedelta(seconds=1),
-            statistic_ids,
-            "hour",
-            None,
-            {"sum"},
+current_stats = await get_instance(self.hass).async_add_executor_job(
+    statistics_during_period,
+    self.hass,
+    start,
+    start + timedelta(seconds=1),
+    statistic_ids,
+    "hour",
+    None,
+    {"sum"},
+)
+result = {}
+for statistic_id in statistic_ids:
+    if statistic_id in current_stats:
+        statistic_sum = current_stats[statistic_id][0]["sum"]
+    else:
+        # If no statistics found right before start_time,
+        # try to get the last statistic but use it only
+        # if it's before start_time. This is needed if
+        # the integration hasn't run for at least a week.
+        last_stat = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
         )
-        result = {}
-        for statistic_id in statistic_ids:
-            if statistic_id in current_stats:
-                statistic_sum = current_stats[statistic_id][0]["sum"]
-            else:
-                # If no statistics found right before start_time,
-                # try to get the last statistic but use it only
-                # if it's before start_time. This is needed if
-                # the integration hasn't run for at least a week.
-                last_stat = await get_instance(self.hass).async_add_executor_job(
-                    get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
-                )
-                if (
-                    last_stat
-                    and last_stat[statistic_id][0]["start"] < start_time.timestamp()
-                ):
-                    statistic_sum = last_stat[statistic_id][0]["sum"]
-                else:
-                    # Expected for new installations or if the statistics were cleared,
-                    # e.g. from the developer tools
-                    statistic_sum = 0.0
+        if last_stat and last_stat[statistic_id][0]["start"] < start_time.timestamp():
+            statistic_sum = last_stat[statistic_id][0]["sum"]
+        else:
+            # Expected for new installations or if the statistics were cleared,
+            # e.g. from the developer tools
+            statistic_sum = 0.0
 ```
 ([`solaredge/coordinator.py#L549-L579`](https://github.com/home-assistant/core/blob/07a2383bdc4f1a71b0b695e24cbc0c1da823f99b/homeassistant/components/solaredge/coordinator.py#L549-L579))
 
@@ -549,51 +544,49 @@ implements backfill from scratch.
 The parts that constitute the convention. Existence probe and baseline read:
 
 ```python
-            last_stat = await get_instance(self.hass).async_add_executor_job(
-                get_last_statistics, self.hass, 1, consumption_statistic_id, True, set()
-            )
-            if not last_stat:
-                _LOGGER.debug("Updating statistic for the first time")
-                cost_reads = await self._async_get_cost_reads(
-                    account, self.api.utility.timezone()
-                )
-                cost_sum = 0.0
-                compensation_sum = 0.0
-                consumption_sum = 0.0
-                return_sum = 0.0
-                last_stats_time = None
-            else:
-                ...
-                cost_reads = await self._async_get_cost_reads(
-                    account,
-                    self.api.utility.timezone(),
-                    last_stat[consumption_statistic_id][0]["start"],
-                )
-                if not cost_reads:
-                    _LOGGER.debug("No recent usage/cost data. Skipping update")
-                    continue
-                start = cost_reads[0].start_time
-                _LOGGER.debug("Getting statistics at: %s", start)
-                # In the common case there should be a previous statistic at start time
-                # so we only need to fetch one statistic. If there isn't any, fetch all.
-                for end in (start + timedelta(seconds=1), None):
-                    stats = await get_instance(self.hass).async_add_executor_job(
-                        statistics_during_period,
-                        self.hass,
-                        start,
-                        end,
-                        {
-                            cost_statistic_id,
-                            compensation_statistic_id,
-                            consumption_statistic_id,
-                            return_statistic_id,
-                        },
-                        "hour",
-                        None,
-                        {"sum"},
-                    )
-                    if stats:
-                        break
+last_stat = await get_instance(self.hass).async_add_executor_job(
+    get_last_statistics, self.hass, 1, consumption_statistic_id, True, set()
+)
+if not last_stat:
+    _LOGGER.debug("Updating statistic for the first time")
+    cost_reads = await self._async_get_cost_reads(account, self.api.utility.timezone())
+    cost_sum = 0.0
+    compensation_sum = 0.0
+    consumption_sum = 0.0
+    return_sum = 0.0
+    last_stats_time = None
+else:
+    ...
+    cost_reads = await self._async_get_cost_reads(
+        account,
+        self.api.utility.timezone(),
+        last_stat[consumption_statistic_id][0]["start"],
+    )
+    if not cost_reads:
+        _LOGGER.debug("No recent usage/cost data. Skipping update")
+        continue
+    start = cost_reads[0].start_time
+    _LOGGER.debug("Getting statistics at: %s", start)
+    # In the common case there should be a previous statistic at start time
+    # so we only need to fetch one statistic. If there isn't any, fetch all.
+    for end in (start + timedelta(seconds=1), None):
+        stats = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            start,
+            end,
+            {
+                cost_statistic_id,
+                compensation_statistic_id,
+                consumption_statistic_id,
+                return_statistic_id,
+            },
+            "hour",
+            None,
+            {"sum"},
+        )
+        if stats:
+            break
 ```
 ([`opower/coordinator.py#L227-L291`](https://github.com/home-assistant/core/blob/07a2383bdc4f1a71b0b695e24cbc0c1da823f99b/homeassistant/components/opower/coordinator.py#L227-L291))
 
@@ -621,18 +614,16 @@ Accumulation and emission — note the baseline is the sum at the *30-days-back*
 after it is re-emitted (and therefore overwritten in the DB):
 
 ```python
-            for cost_read in cost_reads:
-                start = cost_read.start_time
-                if last_stats_time is not None and start.timestamp() <= last_stats_time:
-                    continue
-                ...
-                cost_sum += cost_state
-                ...
-                cost_statistics.append(
-                    StatisticData(start=start, state=cost_state, sum=cost_sum)
-                )
-            ...
-            async_add_external_statistics(self.hass, cost_metadata, cost_statistics)
+for cost_read in cost_reads:
+    start = cost_read.start_time
+    if last_stats_time is not None and start.timestamp() <= last_stats_time:
+        continue
+    ...
+    cost_sum += cost_state
+    ...
+    cost_statistics.append(StatisticData(start=start, state=cost_state, sum=cost_sum))
+...
+async_add_external_statistics(self.hass, cost_metadata, cost_statistics)
 ```
 ([`opower/coordinator.py#L328-L365`](https://github.com/home-assistant/core/blob/07a2383bdc4f1a71b0b695e24cbc0c1da823f99b/homeassistant/components/opower/coordinator.py#L328-L365))
 
