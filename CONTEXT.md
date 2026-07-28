@@ -52,6 +52,8 @@ _Avoid_: entity ID, key, name
 
 **Backfill**:
 The catch-up import of a stretch of history, run once when a config entry is first set up.
+A backfill that imports nothing at all has not run: it is re-attempted in full, rather than
+leaving the window to the narrower retry days.
 _Avoid_: initial sync, history import, seed, bootstrap
 
 **Retry day**:

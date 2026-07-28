@@ -22,14 +22,20 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api_client import API_ERRORS, ApiClient
+from .auth import CoolblueAuthError
 from .const import (
     BACKFILL_DAYS,
+    CONF_DEBTOR_ID,
+    CONF_LOCATION_ID,
     DOMAIN,
     RETRY_DAYS,
+    SCAN_INTERVAL,
 )
 from .ha_external_statistics.recorder import async_inject_day
 from .ha_external_statistics.statistics_mixin import StatisticsLoopMixin
@@ -58,6 +64,17 @@ class CoordinatorData:
     gas: list[MeterReadingEntry]
 
 
+@dataclass
+class CoolblueRuntimeData:
+    """What a loaded config entry owns, reachable as ``entry.runtime_data``."""
+
+    coordinator: CoolblueCoordinator
+    client: ApiClient
+
+
+type CoolblueConfigEntry = ConfigEntry[CoolblueRuntimeData]
+
+
 # ── Coordinator ───────────────────────────────────────────────────────────────
 
 
@@ -73,20 +90,21 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
     def __init__(
         self,
         hass: HomeAssistant,
+        entry: CoolblueConfigEntry,
         client: ApiClient,
-        debtor_id: str,
-        location_id: str,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
+            update_interval=SCAN_INTERVAL,
             backfill_days=BACKFILL_DAYS,
             retry_days=RETRY_DAYS,
         )
         self._client = client
-        self._debtor_id = debtor_id
-        self._location_id = location_id
+        self._debtor_id: str = entry.data[CONF_DEBTOR_ID]
+        self._location_id: str = entry.data[CONF_LOCATION_ID]
         self._last_data: CoordinatorData = CoordinatorData(electricity=[], gas=[])
 
     # ── DataUpdateCoordinator hook ────────────────────────────────────────────
@@ -132,60 +150,43 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
     ) -> tuple[
         list[MeterReadingEntry], list[MeterReadingEntry], list[MeterReadingEntry]
     ]:
-        """Fetch hourly electricity, gas, and costs data for *day* from the API."""
-        electricity: list[MeterReadingEntry] = []
-        gas: list[MeterReadingEntry] = []
-        costs: list[MeterReadingEntry] = []
-        electricity_exception: Exception | None = None
-        gas_exception: Exception | None = None
-        costs_exception: Exception | None = None
+        """Fetch hourly electricity, gas, and costs readings for *day* from the API.
 
-        try:
-            electricity = await self._client.get_hourly_energy(
-                GetMeterReadingsRequest(
-                    customer_id=self._debtor_id,
-                    connection_uuid=self._location_id,
-                    energy_type="electricity",
-                    for_date=day,
+        An energy type that fails comes back empty — a partially published day is
+        normal. Only a day where all three fail raises.
+        """
+        readings: list[list[MeterReadingEntry]] = []
+        failures: list[Exception] = []
+
+        for energy_type in ("electricity", "gas", "costs"):
+            try:
+                readings.append(
+                    await self._client.get_hourly_energy(
+                        GetMeterReadingsRequest(
+                            customer_id=self._debtor_id,
+                            connection_uuid=self._location_id,
+                            energy_type=energy_type,
+                            for_date=day,
+                        )
+                    )
                 )
-            )
-        except API_ERRORS as exc:
-            electricity_exception = exc
-            _LOGGER.debug("Could not fetch electricity data for %s: %s", day, exc)
-
-        try:
-            gas = await self._client.get_hourly_energy(
-                GetMeterReadingsRequest(
-                    customer_id=self._debtor_id,
-                    connection_uuid=self._location_id,
-                    energy_type="gas",
-                    for_date=day,
+            except CoolblueAuthError as exc:
+                # All three types share one login, so there is nothing left to
+                # try today or on the next poll: only a new password helps.
+                raise ConfigEntryAuthFailed(
+                    "Coolblue rejected the stored credentials"
+                ) from exc
+            except API_ERRORS as exc:
+                readings.append([])
+                failures.append(exc)
+                _LOGGER.debug(
+                    "Could not fetch %s data for %s: %s", energy_type, day, exc
                 )
-            )
-        except API_ERRORS as exc:
-            gas_exception = exc
-            _LOGGER.debug("Could not fetch gas data for %s: %s", day, exc)
 
-        try:
-            costs = await self._client.get_hourly_energy(
-                GetMeterReadingsRequest(
-                    customer_id=self._debtor_id,
-                    connection_uuid=self._location_id,
-                    energy_type="costs",
-                    for_date=day,
-                )
-            )
-        except API_ERRORS as exc:
-            costs_exception = exc
-            _LOGGER.debug("Could not fetch costs data for %s: %s", day, exc)
+        if len(failures) == len(readings):
+            raise failures[0]
 
-        if (
-            electricity_exception is not None
-            and gas_exception is not None
-            and costs_exception is not None
-        ):
-            raise electricity_exception
-
+        electricity, gas, costs = readings
         return electricity, gas, costs
 
     async def _inject_statistics(
