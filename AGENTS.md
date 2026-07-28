@@ -85,7 +85,7 @@ Test at the existing seams, one file per seam:
 | `api_client.ApiClient` (HTTP/parse)   | `tests/test_api_client.py`   |
 | `coordinator` (fetch → statistics)    | `tests/test_coordinator.py`  |
 | `config_flow` (setup UI)              | `tests/test_config_flow.py`  |
-| config entry lifecycle (real HA)      | `tests/test_config_entry.py` |
+| config entry lifecycle                | `tests/test_config_entry.py` |
 
 Assert on observable behavior at those boundaries, not on private helpers or internal call
 order. Fixtures and entry factories live in `tests/conftest.py` (`make_electricity_entry`,
@@ -93,25 +93,26 @@ order. Fixtures and entry factories live in `tests/conftest.py` (`make_electrici
 those helpers instead of hand-rolling `MeterReadingEntry` literals, and add new factories
 there rather than duplicating setup per test.
 
-### Two harnesses, temporarily
+### The test harness
 
-`tests/conftest.py` hands out a **real** Home Assistant via
+There is exactly one way to get a Home Assistant instance: the `hass` fixture from
 `pytest-homeassistant-custom-component` (dev-group only — never add it to `manifest.json`, it
-must not reach a user's install). The `coordinator` fixture is a real `CoolblueCoordinator`
-on a real `hass` with a real recorder behind it, so `get_instance(hass)` resolves to
-something that actually queries statistics.
+must not reach a user's install). There is no mock Home Assistant. Don't build one.
 
-What remains on hand-rolled mocks is `tests/ha_external_statistics/`, which builds local
-`MagicMock` hass objects per test and patches `get_instance` itself. Those are being migrated
-away; the real harness is where new tests go.
+Two rules when writing against it:
 
-One rule when writing against it: request `recorder_mock` **before**
-`enable_custom_integrations` in the test signature. The integration declares a `recorder`
-dependency and the plugin asserts this ordering.
+- Request `recorder_mock` **before** `hass` and before `enable_custom_integrations`. The
+  integration declares a `recorder` dependency and the plugin asserts this ordering.
+- Spy on a real method rather than replacing it — `_spy_on` in `tests/test_coordinator.py`
+  wraps the bound method so the call still does its work while the test counts it.
 
-Spy on a real coordinator method rather than replacing it — `_spy_on` in
-`tests/test_coordinator.py` wraps the bound method so the call still does its work while the
-test counts it.
+Statistics tests go *through* the recorder, not around it: write with
+`ExternalStatistic.inject`, then read back with `async_stat_rows`
+(`tests/ha_external_statistics/conftest.py`) or with the helper under test. Patching
+`statistics_during_period` only proves the code called it.
+
+`StatisticsLoopMixin` is the exception that needs no harness: it never touches `hass`, so
+`tests/ha_external_statistics/test_statistics_mixin.py` drives it through a plain subclass.
 
 The plugin pins an exact Home Assistant version, so `homeassistant` and
 `pytest-homeassistant-custom-component` must be bumped in lockstep.
