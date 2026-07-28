@@ -115,6 +115,17 @@ backwards clock jump, a hand-edited database, or a second writer on the same sta
 exception message therefore names the statistic id, the offending row's timestamp, and the recovery
 in §6 — a loud failure with no stated exit is just a support ticket.
 
+**Both guarantees above are conditional on both entry points ending at yesterday.** If
+`async_reimport` ever gains an optional `until`, rows normally exist *after* the range, and a `since`
+that follows a gap reaches case 6 legitimately — where aborting with "clear this statistic" is
+actively dangerous mid-series. The guard would have to become *newest row strictly before the
+boundary*, which core cannot express cheaply: `statistics_during_period` requires a `start_time` and
+`get_last_statistics` is unbounded-newest-only, so it costs an escalating-window probe or a full
+pre-boundary scan. Scoped into
+[Does the library ship a repair path for already-corrupted sum series?](https://github.com/barisdemirdelen/homeassistant-coolblue-energy/issues/27)
+along with the step it leaves at `until + 1h`, because both need the same `adjust_statistics`
+machinery.
+
 ## 5. Gaps
 
 **An unpublished day writes nothing.** `fetch` returning `{}`, or an empty sequence for one
