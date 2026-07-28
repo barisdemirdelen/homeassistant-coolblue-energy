@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Home Assistant custom integration (`custom_components/coolblue_energy`, domain `coolblue_energy`).
-Python 3.14 (`.python-version`), dependencies managed by **uv** (`pyproject.toml` + `uv.lock`).
+Python 3.14 (`.python-version`), floor `>=3.14.2` in `pyproject.toml` because that is what
+`homeassistant` itself requires. Dependencies managed by **uv** (`pyproject.toml` + `uv.lock`).
 
 > **Py3.14 syntax quirk — do not "fix" it.** `except RuntimeError, ValueError:` (no
 > parentheses) in `api_client.py::_retry_with_backoff` is *valid* under PEP 758, new in 3.14.
@@ -54,7 +55,7 @@ Notes:
   `dt_util.now().date()`, so the HA-configured timezone is respected. This applies in tests too.
 - **`ty`** — Astral's type checker, currently green across the repo. Keep it green; a `ty`
   error in code you touched is a blocker.
-- **`pytest`** — 135 tests, ~4s. Config in `pytest.ini`: `testpaths = tests`,
+- **`pytest`** — 136 tests, ~4s. Config in `pytest.ini`: `testpaths = tests`,
   `asyncio_mode = auto` (async tests need no `@pytest.mark.asyncio`). Narrow with
   `uv run pytest tests/test_coordinator.py -k some_case`. Coverage via `pytest-cov`:
   `uv run pytest --cov=custom_components/coolblue_energy`.
@@ -77,17 +78,36 @@ written after the fix proves nothing.
 
 Test at the existing seams, one file per seam:
 
-| Seam                                | Test file                  |
-| ----------------------------------- | -------------------------- |
-| `api_client.ApiClient` (HTTP/parse)  | `tests/test_api_client.py` |
-| `coordinator` (fetch → statistics)   | `tests/test_coordinator.py`|
-| `config_flow` (setup UI)             | `tests/test_config_flow.py`|
+| Seam                                  | Test file                    |
+| ------------------------------------- | ---------------------------- |
+| `api_client.ApiClient` (HTTP/parse)   | `tests/test_api_client.py`   |
+| `coordinator` (fetch → statistics)    | `tests/test_coordinator.py`  |
+| `config_flow` (setup UI)              | `tests/test_config_flow.py`  |
+| config entry lifecycle (real HA)      | `tests/test_config_entry.py` |
 
 Assert on observable behavior at those boundaries, not on private helpers or internal call
 order. Fixtures and entry factories live in `tests/conftest.py` (`make_electricity_entry`,
 `make_day_gas`, `mock_api_client`, `mock_hass`, `coordinator`, …) — build test data from
 those helpers instead of hand-rolling `MeterReadingEntry` literals, and add new factories
 there rather than duplicating setup per test.
+
+### Two harnesses, temporarily
+
+Most of the suite runs against `mock_hass`, a hand-rolled `MagicMock` Home Assistant, plus an
+autouse `patch_get_instance` fixture that fakes the recorder. `tests/test_config_entry.py`
+runs against a **real** Home Assistant via `pytest-homeassistant-custom-component`
+(dev-group only — never add it to `manifest.json`, it must not reach a user's install).
+
+The real harness is where new tests go; the mock one is being migrated away. Two rules when
+writing against it:
+
+- Request `recorder_mock` **before** `enable_custom_integrations` in the test signature. The
+  integration declares a `recorder` dependency and the plugin asserts this ordering.
+- Shadow the autouse `patch_get_instance` fixture with a no-op at module level, so
+  `get_instance` resolves to the recorder `recorder_mock` started.
+
+The plugin pins an exact Home Assistant version, so `homeassistant` and
+`pytest-homeassistant-custom-component` must be bumped in lockstep.
 
 ## CI
 

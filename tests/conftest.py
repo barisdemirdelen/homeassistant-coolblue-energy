@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,7 +16,17 @@ from custom_components.coolblue_energy.model import (
     PeakUsage,
 )
 
+# The Home Assistant test plugin calls ``logging.basicConfig(level=INFO)`` and
+# puts ``sqlalchemy.engine`` at INFO at import time, which echoes every recorder
+# statement to a stream pytest cannot capture. Undo it — conftest is imported
+# after plugins, so this wins.
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
 # ── Factory helpers ───────────────────────────────────────────────────────────
+
+# The account every test acts on: one debtor, one metered location.
+DEBTOR_ID = "00844083"
+LOCATION_ID = "3addb383-a979-40b4-8487-0f3bc0854da5"
 
 _FAKE_DATE = "2026-01-01"
 
@@ -134,10 +145,7 @@ def fake_costs() -> list[MeterReadingEntry]:
 def mock_api_client(fake_electricity, fake_gas, fake_costs) -> AsyncMock:
     """AsyncMock ApiClient that returns fake entries based on energy_type."""
     client = AsyncMock()
-    client.get_energy_ids.return_value = (
-        "00844083",
-        "3addb383-a979-40b4-8487-0f3bc0854da5",
-    )
+    client.get_energy_ids.return_value = (DEBTOR_ID, LOCATION_ID)
 
     def _side_effect(req):
         if req.energy_type == "electricity":
