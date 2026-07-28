@@ -7,12 +7,14 @@ state the entry reaches is Home Assistant's verdict rather than ours.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.setup import async_setup_component
@@ -22,6 +24,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
+from custom_components.coolblue_energy.auth import CoolblueAuthError
 from custom_components.coolblue_energy.const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_START_DATE,
@@ -132,6 +135,82 @@ async def test_reload_does_not_double_the_poll_rate(
     assert (
         mock_api_client.get_hourly_energy.call_count == after_reload + _CALLS_PER_POLL
     )
+
+
+def _reauth_flows(hass: HomeAssistant, entry: MockConfigEntry) -> list[Mapping]:
+    """The re-authentication flows Home Assistant has started for *entry*."""
+    return [
+        flow
+        for flow in hass.config_entries.flow.async_progress()
+        if flow["handler"] == DOMAIN
+        and flow["context"].get("source") == SOURCE_REAUTH
+        and flow["context"].get("entry_id") == entry.entry_id
+    ]
+
+
+async def test_rejected_credentials_at_setup_ask_for_a_new_password(
+    recorder_mock: None,
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    mock_api_client: AsyncMock,
+) -> None:
+    """A password Coolblue refuses is a dead end until the user re-enters it."""
+    config_entry.add_to_hass(hass)
+    mock_api_client.get_hourly_energy.side_effect = CoolblueAuthError("refused")
+
+    with patch(
+        "custom_components.coolblue_energy.ApiClient", return_value=mock_api_client
+    ):
+        assert not await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert config_entry.state is ConfigEntryState.SETUP_ERROR
+    assert _reauth_flows(hass, config_entry)
+
+
+async def test_rejected_credentials_while_polling_ask_for_a_new_password(
+    recorder_mock: None,
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    mock_api_client: AsyncMock,
+) -> None:
+    """A password changed after setup stops the silent staleness: HA asks for it."""
+    config_entry.add_to_hass(hass)
+    await _setup(hass, config_entry, mock_api_client)
+    assert not _reauth_flows(hass, config_entry)
+
+    mock_api_client.get_hourly_energy.side_effect = CoolblueAuthError("refused")
+    await _advance_one_interval(hass)
+
+    assert _reauth_flows(hass, config_entry)
+
+
+async def test_connection_failure_while_polling_is_retried_not_reauthenticated(
+    recorder_mock: None,
+    enable_custom_integrations: None,
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    mock_api_client: AsyncMock,
+) -> None:
+    """Coolblue being unreachable is transient: poll again, never ask for a password."""
+    config_entry.add_to_hass(hass)
+    await _setup(hass, config_entry, mock_api_client)
+    coordinator = config_entry.runtime_data.coordinator
+    healthy = mock_api_client.get_hourly_energy.side_effect
+
+    mock_api_client.get_hourly_energy.side_effect = aiohttp.ClientError("unreachable")
+    await _advance_one_interval(hass)
+
+    assert not coordinator.last_update_success
+    assert not _reauth_flows(hass, config_entry)
+    assert config_entry.state is ConfigEntryState.LOADED
+
+    mock_api_client.get_hourly_energy.side_effect = healthy
+    await _advance_one_interval(hass)
+
+    assert coordinator.last_update_success
 
 
 async def test_reimport_action_is_registered_without_a_loaded_entry(

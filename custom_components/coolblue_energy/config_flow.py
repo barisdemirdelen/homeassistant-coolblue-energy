@@ -5,22 +5,38 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .api_client import ApiClient
+from .auth import CoolblueAuthError
 from .const import CONF_DEBTOR_ID, CONF_LOCATION_ID, DEFAULT_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+
+# A masked field offering the browser's stored Coolblue password. Shared by both
+# steps: a selector is a validator, so one instance serves every schema.
+_PASSWORD_FIELD = TextSelector(
+    TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password")
+)
+
 _USER_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_EMAIL): str,
-        vol.Required(CONF_PASSWORD): str,
+        vol.Required(CONF_EMAIL): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="email")
+        ),
+        vol.Required(CONF_PASSWORD): _PASSWORD_FIELD,
     }
 )
+
+_REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): _PASSWORD_FIELD})
 
 
 class CoolblueConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -64,7 +80,7 @@ class CoolblueConfigFlow(ConfigFlow, domain=DOMAIN):
     # ── Reauth step ───────────────────────────────────────────────────────────
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
-        """Trigger reauth when the session expires."""
+        """Trigger reauth when Coolblue rejects the stored credentials."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -88,8 +104,9 @@ class CoolblueConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+            data_schema=_REAUTH_SCHEMA,
             errors=errors,
+            description_placeholders={CONF_EMAIL: reauth_entry.data[CONF_EMAIL]},
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -100,22 +117,17 @@ class CoolblueConfigFlow(ConfigFlow, domain=DOMAIN):
         Attempt to connect and return ``(debtor_id, location_id, error_key)``.
 
         ``error_key`` is ``None`` on success, or one of the keys in
-        ``translations/en.json`` config.error on failure.
+        ``translations/en.json`` config.error on failure. Only a rejection of the
+        credentials themselves is reported as such; every other failure is a
+        connection problem the user can retry.
         """
         try:
             async with ApiClient(email, password) as client:
                 debtor_id, location_id = await client.get_energy_ids()
             return debtor_id, location_id, None
-        except aiohttp.ClientResponseError as exc:
-            if exc.status in (401, 403):
-                return "", "", "invalid_auth"
-            _LOGGER.exception("HTTP error during Coolblue connect")
-            return "", "", "cannot_connect"
-        except RuntimeError as exc:
-            if "credentials" in str(exc).lower():
-                return "", "", "invalid_auth"
-            _LOGGER.exception("Runtime error during Coolblue connect")
-            return "", "", "cannot_connect"
+        except CoolblueAuthError:
+            _LOGGER.debug("Coolblue rejected the credentials for %s", email)
+            return "", "", "invalid_auth"
         except Exception:
-            _LOGGER.exception("Unexpected error during Coolblue connect")
+            _LOGGER.exception("Could not connect to Coolblue")
             return "", "", "cannot_connect"

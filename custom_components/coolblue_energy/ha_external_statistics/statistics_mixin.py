@@ -13,6 +13,7 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import date, timedelta
 
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -72,7 +73,9 @@ class StatisticsLoopMixin(ABC):
         On subsequent calls: retry the last ``_retry_days`` days to pick up
         late-published data.
 
-        Raises ``UpdateFailed`` on unhandled errors.
+        An authentication failure is not an update failure: it propagates
+        untouched so Home Assistant can ask the user for new credentials.
+        Anything else unhandled is raised as ``UpdateFailed``.
         """
         try:
             if not self._stats_backfilled:
@@ -90,7 +93,7 @@ class StatisticsLoopMixin(ABC):
                 )
                 await self._async_retry_recent_days(self._retry_days)
                 _LOGGER.debug("Scheduled statistics update complete.")
-        except UpdateFailed:
+        except UpdateFailed, ConfigEntryAuthFailed:
             raise
         except Exception as err:
             raise UpdateFailed(f"Error fetching energy statistics: {err}") from err
@@ -113,7 +116,9 @@ class StatisticsLoopMixin(ABC):
         treated as zero consumption — so the cumulative sum does not spike.
 
         When *raise_if_all_fail* is ``True`` and every attempt raised an
-        exception, the last exception is re-raised.
+        exception, the last exception is re-raised. An authentication failure
+        stops the loop outright — no later day can succeed with credentials the
+        service has already refused.
         """
         seed_sums: dict[str, float] | None = None
         any_success = False
@@ -126,6 +131,8 @@ class StatisticsLoopMixin(ABC):
                 any_success = True
                 _LOGGER.debug("Day %s processed successfully.", day)
                 # None return → empty day; seed stays None → next day hits DB.
+            except ConfigEntryAuthFailed:
+                raise
             except Exception as exc:
                 _LOGGER.warning(
                     "Failed to fetch data for %s, skipping.", day, exc_info=True

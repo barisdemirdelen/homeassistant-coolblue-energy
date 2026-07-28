@@ -17,6 +17,44 @@ import aiohttp
 import pytest
 
 from custom_components.coolblue_energy.api_client import ApiClient, _parse_rsc_response
+from custom_components.coolblue_energy.auth import CoolblueAuthError
+
+# ── HTTP response doubles ─────────────────────────────────────────────────────
+
+_CSRF_PAGE = '<html><body><form><input name="csrf" value="tok"></form></body></html>'
+_ACCOUNTS_URL = "https://accounts.coolblue.nl/connect/authorize"
+_SESSION = "custom_components.coolblue_energy.auth.aiohttp.ClientSession"
+
+
+def _page(
+    html: str = "", *, status: int = 200, url: str = _ACCOUNTS_URL, location: str = ""
+) -> MagicMock:
+    """One HTTP response, usable as the async context manager aiohttp returns."""
+    resp = MagicMock(status=status, url=url)
+    resp.headers = {"Location": location} if location else {}
+    resp.text = AsyncMock(return_value=html)
+    if status >= 400:
+        resp.raise_for_status = MagicMock(
+            side_effect=aiohttp.ClientResponseError(
+                request_info=MagicMock(), history=(), status=status
+            )
+        )
+    else:
+        resp.raise_for_status = MagicMock()
+    resp.__aenter__ = AsyncMock(return_value=resp)
+    resp.__aexit__ = AsyncMock(return_value=None)
+    return resp
+
+
+def _login_session(*, gets: list, posts: list) -> MagicMock:
+    """A stand-in ClientSession that replays *gets* and *posts* in order."""
+    session = MagicMock(closed=False)
+    session.get = MagicMock(side_effect=gets)
+    session.post = MagicMock(side_effect=posts)
+    session.close = AsyncMock()
+    session.cookie_jar.filter_cookies = MagicMock(return_value={})
+    return session
+
 
 # ── RSC Parsing Robustness ────────────────────────────────────────────────────
 
@@ -173,17 +211,65 @@ class TestEnergyIdExtractionFallback:
         {"props":{"pageProps":{"debtorNumber":"12345678","locationId":"deadbeef-0000-0000-0000-000000000000"}}}
         </script></body></html>"""
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.text = AsyncMock(return_value=html)
-        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_resp.__aexit__ = AsyncMock(return_value=None)
-
         # session.get() is sync and returns an async context manager (not a coroutine)
         mock_session = MagicMock(closed=False)
-        mock_session.get = MagicMock(return_value=mock_resp)
+        mock_session.get = MagicMock(return_value=_page(html))
         client._get_session = AsyncMock(return_value=mock_session)
 
         debtor, location = await client.get_energy_ids()
         assert debtor == "12345678"
         assert location.startswith("deadbeef")
+
+
+# ── Credential Rejection ──────────────────────────────────────────────────────
+
+
+class TestCredentialRejection:
+    """A rejected password is its own exception type, not a generic failure."""
+
+    async def test_password_not_accepted_raises_auth_error(self):
+        """The portal answers the password POST with the form again, not a redirect."""
+        session = _login_session(
+            gets=[_page(_CSRF_PAGE)],
+            posts=[_page(_CSRF_PAGE), _page(_CSRF_PAGE)],
+        )
+        with patch(_SESSION, return_value=session), pytest.raises(CoolblueAuthError):
+            async with ApiClient("user@example.com", "wrong") as client:
+                await client.get_energy_ids()
+
+    async def test_callback_landing_back_on_accounts_raises_auth_error(self):
+        """The OIDC callback bounces back to the accounts page: not logged in."""
+        session = _login_session(
+            gets=[_page(_CSRF_PAGE), _page("", url=f"{_ACCOUNTS_URL}/login")],
+            posts=[
+                _page(_CSRF_PAGE),
+                _page(status=302, location="/connect/callback?code=x"),
+            ],
+        )
+        with patch(_SESSION, return_value=session), pytest.raises(CoolblueAuthError):
+            async with ApiClient("user@example.com", "wrong") as client:
+                await client.get_energy_ids()
+
+    async def test_server_error_during_login_is_not_an_auth_error(self):
+        """A 500 while logging in is a broken portal, not a wrong password."""
+        session = _login_session(
+            gets=[_page(_CSRF_PAGE)],
+            posts=[_page(_CSRF_PAGE), _page(status=500)],
+        )
+        with patch(_SESSION, return_value=session):
+            async with ApiClient("user@example.com", "hunter2") as client:
+                with pytest.raises(aiohttp.ClientResponseError) as caught:
+                    await client.get_energy_ids()
+        assert not isinstance(caught.value, CoolblueAuthError)
+
+    async def test_cloudfront_block_is_not_an_auth_error(self):
+        """A WAF 403 on the password POST is a connection problem, not credentials."""
+        session = _login_session(
+            gets=[_page(_CSRF_PAGE)],
+            posts=[_page(_CSRF_PAGE), _page(status=403)],
+        )
+        with patch(_SESSION, return_value=session):
+            async with ApiClient("user@example.com", "hunter2") as client:
+                with pytest.raises(RuntimeError) as caught:
+                    await client.get_energy_ids()
+        assert not isinstance(caught.value, CoolblueAuthError)
