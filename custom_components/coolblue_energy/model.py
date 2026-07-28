@@ -25,7 +25,7 @@ statistics helpers.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -78,7 +78,7 @@ class GetMeterReadingsRequest(CamelCaseModel):
             0,
             0,
             tzinfo=_TZ_NL,
-        ).astimezone(timezone.utc)
+        ).astimezone(UTC)
         next_date = f"$D{day_start_utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')}"
         return [
             self.customer_id,

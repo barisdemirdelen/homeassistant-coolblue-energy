@@ -3,6 +3,12 @@
 Home Assistant custom integration (`custom_components/coolblue_energy`, domain `coolblue_energy`).
 Python 3.14 (`.python-version`), dependencies managed by **uv** (`pyproject.toml` + `uv.lock`).
 
+> **Py3.14 syntax quirk — do not "fix" it.** `except RuntimeError, ValueError:` (no
+> parentheses) in `api_client.py::_retry_with_backoff` is *valid* under PEP 758, new in 3.14.
+> It is identical to the Python 2 form that was a `SyntaxError` in 3.0–3.13, so it reads like a
+> bug. The bare form is allowed only without an `as` clause; with a binding you still need
+> `except (A, B) as exc:`. Confirm with `ast.parse` before touching suspicious syntax here.
+
 ## Toolchain
 
 Everything runs through `uv`. **Never** invoke `python`, `pip`, `pytest`, `ruff`, or `ty`
@@ -36,12 +42,16 @@ uv run pytest
 
 Notes:
 
-- **`ruff`** — no `[tool.ruff]` config exists; defaults apply. The repo is not clean at
-  baseline (`tests/test_coordinator.py` has pre-existing `F401`s). Judge yourself on
-  *new* diagnostics, not the total count.
-- **`ruff format`** — the repo is *not* uniformly formatted (6 files would be reformatted).
-  Format only files you touched: `uv run ruff format path/to/file.py`. Never run
-  `uv run ruff format .` — it produces a large unrelated diff.
+- **`ruff`** — pinned to `>=0.16` in the dev group. Ruff 0.16 expanded its *default* rule set
+  from 59 rules (`E4,E7,E9,F`) to 413 (adds `UP`, `SIM`, `DTZ`, `BLE`, `PLR`, `RET`, `RUF`,
+  `PYI`, `C4`, `YTT`, …). There is deliberately no `[tool.ruff]` config — defaults apply, and
+  the repo is **clean at baseline**. Any diagnostic is yours; fix it rather than adding
+  `# noqa` or a config exemption.
+- **`ruff format`** — the repo *is* uniformly formatted. Format files you touched
+  (`uv run ruff format path/to/file.py`) and keep `uv run ruff format --check .` green.
+- **dates** — never call `date.today()` / `datetime.now()` bare (`DTZ` rules). Use
+  `homeassistant.util.dt` (`from homeassistant.util import dt as dt_util`), e.g.
+  `dt_util.now().date()`, so the HA-configured timezone is respected. This applies in tests too.
 - **`ty`** — Astral's type checker, currently green across the repo. Keep it green; a `ty`
   error in code you touched is a blocker.
 - **`pytest`** — 135 tests, ~4s. Config in `pytest.ini`: `testpaths = tests`,

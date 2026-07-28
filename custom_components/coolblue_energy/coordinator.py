@@ -25,7 +25,7 @@ from datetime import date
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .api_client import ApiClient
+from .api_client import API_ERRORS, ApiClient
 from .const import (
     BACKFILL_DAYS,
     DOMAIN,
@@ -144,7 +144,7 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
                     for_date=day,
                 )
             )
-        except Exception as exc:
+        except API_ERRORS as exc:
             electricity_exception = exc
             _LOGGER.debug("Could not fetch electricity data for %s: %s", day, exc)
 
@@ -157,7 +157,7 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
                     for_date=day,
                 )
             )
-        except Exception as exc:
+        except API_ERRORS as exc:
             gas_exception = exc
             _LOGGER.debug("Could not fetch gas data for %s: %s", day, exc)
 
@@ -170,7 +170,7 @@ class CoolblueCoordinator(StatisticsLoopMixin, DataUpdateCoordinator[Coordinator
                     for_date=day,
                 )
             )
-        except Exception as exc:
+        except API_ERRORS as exc:
             costs_exception = exc
             _LOGGER.debug("Could not fetch costs data for %s: %s", day, exc)
 

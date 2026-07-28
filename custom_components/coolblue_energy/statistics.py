@@ -9,7 +9,7 @@ Amsterdam-timezone helpers needed to anchor the day's start in UTC.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from homeassistant.const import CURRENCY_EURO, UnitOfEnergy, UnitOfVolume
@@ -58,13 +58,13 @@ def _entry_to_utc(name: str, for_date: date) -> datetime:
     h, m = int(name[:2]), int(name[3:5])
     local_dt = datetime(for_date.year, for_date.month, for_date.day, h, m,
                         tzinfo=_TZ_NL)
-    return local_dt.astimezone(timezone.utc)
+    return local_dt.astimezone(UTC)
 
 
 def _day_start_utc(day: date) -> datetime:
     """Return the UTC datetime for midnight of *day* in Amsterdam local time."""
     return datetime(day.year, day.month, day.day, 0, 0, tzinfo=_TZ_NL).astimezone(
-        timezone.utc
+        UTC
     )
 
 

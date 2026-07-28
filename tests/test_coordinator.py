@@ -13,10 +13,11 @@ keys), so dict-style access is used throughout.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.coolblue_energy.const import (
     BACKFILL_DAYS,
@@ -37,8 +38,6 @@ from custom_components.coolblue_energy.statistics import (
     _day_start_utc,
     _entry_to_utc,
 )
-
-from .conftest import make_day_electricity, make_day_gas
 
 _STATS_PATH = "custom_components.coolblue_energy.ha_external_statistics.recorder.statistics_during_period"
 _GET_SUM_PATH = "custom_components.coolblue_energy.ha_external_statistics.recorder.async_get_last_sum"
@@ -64,30 +63,30 @@ class TestEntryToUtc:
     def test_winter_cet_offset(self):
         """CET = UTC+1: 14:00 Amsterdam on Jan 15 → 13:00 UTC."""
         assert _entry_to_utc("14:00", date(2026, 1, 15)) == datetime(
-            2026, 1, 15, 13, 0, tzinfo=timezone.utc
+            2026, 1, 15, 13, 0, tzinfo=UTC
         )
 
     def test_summer_cest_offset(self):
         """CEST = UTC+2: 14:00 Amsterdam on Jul 15 → 12:00 UTC."""
         assert _entry_to_utc("14:00", date(2026, 7, 15)) == datetime(
-            2026, 7, 15, 12, 0, tzinfo=timezone.utc
+            2026, 7, 15, 12, 0, tzinfo=UTC
         )
 
     def test_midnight_winter_crosses_day_boundary(self):
         """00:00 Amsterdam CET → 23:00 of the previous UTC day."""
         assert _entry_to_utc("00:00", date(2026, 1, 15)) == datetime(
-            2026, 1, 14, 23, 0, tzinfo=timezone.utc
+            2026, 1, 14, 23, 0, tzinfo=UTC
         )
 
     def test_midnight_summer_crosses_day_boundary(self):
         """00:00 Amsterdam CEST → 22:00 of the previous UTC day."""
         assert _entry_to_utc("00:00", date(2026, 7, 15)) == datetime(
-            2026, 7, 14, 22, 0, tzinfo=timezone.utc
+            2026, 7, 14, 22, 0, tzinfo=UTC
         )
 
     def test_result_is_utc(self):
         result = _entry_to_utc("10:00", date(2026, 3, 1))
-        assert result.tzinfo is timezone.utc
+        assert result.tzinfo is UTC
 
     def test_hours_across_24h_day(self):
         """Consecutive hours must be exactly 1 h apart in UTC."""
@@ -103,13 +102,13 @@ class TestDayStartUtc:
     def test_winter(self):
         """Jan 15 00:00 CET → Jan 14 23:00 UTC."""
         assert _day_start_utc(date(2026, 1, 15)) == datetime(
-            2026, 1, 14, 23, 0, tzinfo=timezone.utc
+            2026, 1, 14, 23, 0, tzinfo=UTC
         )
 
     def test_summer(self):
         """Jul 15 00:00 CEST → Jul 14 22:00 UTC."""
         assert _day_start_utc(date(2026, 7, 15)) == datetime(
-            2026, 7, 14, 22, 0, tzinfo=timezone.utc
+            2026, 7, 14, 22, 0, tzinfo=UTC
         )
 
     def test_equals_first_entry_utc(self):
@@ -121,7 +120,7 @@ class TestDayStartUtc:
         """2026 spring forward is March 29 (last Sunday of March).
         Amsterdam 00:00 is still CET on that day → UTC-1h = 23:00 March 28."""
         assert _day_start_utc(date(2026, 3, 29)) == datetime(
-            2026, 3, 28, 23, 0, tzinfo=timezone.utc
+            2026, 3, 28, 23, 0, tzinfo=UTC
         )
 
 
@@ -130,7 +129,7 @@ class TestDayStartUtc:
 
 class TestGetSumBefore:
     async def test_returns_zero_when_no_data(self, coordinator):
-        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=timezone.utc)
+        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=UTC)
         with patch(_STATS_PATH, return_value={}):
             result = await async_get_last_sum(
                 coordinator.hass, STAT_ELECTRICITY_CONSUMED, before_dt
@@ -138,7 +137,7 @@ class TestGetSumBefore:
         assert result == 0.0
 
     async def test_returns_last_entry_sum(self, coordinator):
-        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=timezone.utc)
+        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=UTC)
         fake = {
             STAT_ELECTRICITY_CONSUMED: [
                 {"sum": 100.0},
@@ -153,7 +152,7 @@ class TestGetSumBefore:
 
     async def test_returns_zero_for_none_sum(self, coordinator):
         """A None sum (data gap) must fall back to 0.0."""
-        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=timezone.utc)
+        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=UTC)
         with patch(
             _STATS_PATH, return_value={STAT_ELECTRICITY_CONSUMED: [{"sum": None}]}
         ):
@@ -164,7 +163,7 @@ class TestGetSumBefore:
 
     async def test_queries_25h_window_before_dt(self, coordinator):
         """The query window must start 25 h before before_dt to cover DST days."""
-        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=timezone.utc)
+        before_dt = datetime(2026, 1, 14, 23, 0, tzinfo=UTC)
         expected_start = before_dt - timedelta(hours=25)
         captured = {}
 
@@ -270,7 +269,7 @@ class TestInjectStatistics:
             )
 
         assert captured["first_start"] == datetime(
-            2026, 1, 13, 23, 0, tzinfo=timezone.utc
+            2026, 1, 13, 23, 0, tzinfo=UTC
         )
 
     async def test_statistic_data_sums_accumulate(
@@ -472,7 +471,7 @@ class TestAsyncBackfill:
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 5:
+            if (dt_util.now().date() - day).days == 5:
                 raise RuntimeError("Simulated API failure")
             return await original_fetch(day)
 
@@ -494,7 +493,7 @@ class TestAsyncBackfill:
 
         async def patched_fetch(day):
             fetch_count[0] += 1
-            if (date.today() - day).days == 4:
+            if (dt_util.now().date() - day).days == 4:
                 raise RuntimeError("Simulated failure")
             return await original_fetch(day)
 
@@ -597,7 +596,7 @@ class TestAsyncRetryRecentDays:
 
     async def test_skips_injection_for_empty_day(self, coordinator):
         """A day that returns ([], [], []) must not inject any data for that day."""
-        empty_day = date.today() - timedelta(days=2)
+        empty_day = dt_util.now().date() - timedelta(days=2)
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
@@ -626,7 +625,7 @@ class TestAsyncRetryRecentDays:
 
         async def patched_fetch(day):
             fetch_count[0] += 1
-            if (date.today() - day).days == 2:
+            if (dt_util.now().date() - day).days == 2:
                 return [], [], []
             return await original_fetch(day)
 
@@ -653,7 +652,7 @@ class TestAsyncRetryRecentDays:
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 2:
+            if (dt_util.now().date() - day).days == 2:
                 return [], [], []
             return await original_fetch(day)
 
@@ -674,7 +673,7 @@ class TestAsyncRetryRecentDays:
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 1:  # yesterday
+            if (dt_util.now().date() - day).days == 1:  # yesterday
                 return [], [], []
             return await original_fetch(day)
 
@@ -708,7 +707,7 @@ class TestAsyncRetryRecentDays:
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 2:
+            if (dt_util.now().date() - day).days == 2:
                 raise RuntimeError("Transient API error")
             return await original_fetch(day)
 
@@ -727,7 +726,7 @@ class TestAsyncRetryRecentDays:
 
         async def patched_fetch(day):
             fetch_count[0] += 1
-            if (date.today() - day).days == 2:
+            if (dt_util.now().date() - day).days == 2:
                 raise RuntimeError("Transient error")
             return await original_fetch(day)
 
@@ -750,7 +749,7 @@ class TestAsyncRetryRecentDays:
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 3:
+            if (dt_util.now().date() - day).days == 3:
                 raise RuntimeError("Oldest day failed")
             return await original_fetch(day)
 
@@ -796,7 +795,7 @@ class TestAsyncRetryRecentDays:
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 2:
+            if (dt_util.now().date() - day).days == 2:
                 raise RuntimeError("Simulated failure")
             return await original_fetch(day)
 
@@ -826,7 +825,7 @@ class TestAsyncReimportStatistics:
 
     async def test_fetches_correct_number_of_days(self, coordinator):
         """get_hourly_energy is called 3× for each day in the requested range."""
-        start = date.today() - timedelta(days=5)
+        start = dt_util.now().date() - timedelta(days=5)
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
@@ -836,7 +835,7 @@ class TestAsyncReimportStatistics:
 
     async def test_fetches_single_day_when_start_is_yesterday(self, coordinator):
         """Passing yesterday as start_date must result in exactly one day fetched."""
-        start = date.today() - timedelta(days=1)
+        start = dt_util.now().date() - timedelta(days=1)
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
@@ -848,7 +847,7 @@ class TestAsyncReimportStatistics:
         coordinator.async_refresh = AsyncMock()
 
         with patch(_ADD_PATH) as mock_add:
-            await coordinator.async_reimport_statistics(date.today())
+            await coordinator.async_reimport_statistics(dt_util.now().date())
 
         coordinator._client.get_hourly_energy.assert_not_called()
         mock_add.assert_not_called()
@@ -860,7 +859,7 @@ class TestAsyncReimportStatistics:
 
         with patch(_ADD_PATH) as mock_add:
             await coordinator.async_reimport_statistics(
-                date.today() + timedelta(days=3)
+                dt_util.now().date() + timedelta(days=3)
             )
 
         coordinator._client.get_hourly_energy.assert_not_called()
@@ -869,7 +868,7 @@ class TestAsyncReimportStatistics:
 
     async def test_calls_async_set_updated_data_after_completion(self, coordinator):
         """async_set_updated_data must be called once after all days are processed."""
-        start = date.today() - timedelta(days=3)
+        start = dt_util.now().date() - timedelta(days=3)
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH):
             await coordinator.async_reimport_statistics(start)
@@ -880,7 +879,7 @@ class TestAsyncReimportStatistics:
 
     async def test_injects_statistics_for_all_days(self, coordinator):
         """async_add_external_statistics must be called once per stat per successful day."""
-        start = date.today() - timedelta(days=3)
+        start = dt_util.now().date() - timedelta(days=3)
 
         with patch(_STATS_PATH, return_value={}), patch(_ADD_PATH) as mock_add:
             await coordinator.async_reimport_statistics(start)
@@ -890,7 +889,7 @@ class TestAsyncReimportStatistics:
 
     async def test_seeds_from_db_before_start_date(self, coordinator):
         """The seed sums must be queried from the DB at start_date, not time zero."""
-        start = date.today() - timedelta(days=3)
+        start = dt_util.now().date() - timedelta(days=3)
         queried_dts = []
 
         async def spy_get_sum(hass, stat_id, dt, **kwargs):
@@ -905,7 +904,7 @@ class TestAsyncReimportStatistics:
 
     async def test_seeds_chained_across_days(self, coordinator):
         """DB is only queried 6 times (seed for the first day); rest are chained."""
-        start = date.today() - timedelta(days=4)
+        start = dt_util.now().date() - timedelta(days=4)
         get_sum_calls = []
 
         async def spy_get_sum(hass, stat_id, dt, **kwargs):
@@ -921,11 +920,11 @@ class TestAsyncReimportStatistics:
 
     async def test_skips_empty_day_and_continues(self, coordinator):
         """A day with no data must be skipped; remaining days must still be processed."""
-        start = date.today() - timedelta(days=3)
+        start = dt_util.now().date() - timedelta(days=3)
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
-            if (date.today() - day).days == 2:
+            if (dt_util.now().date() - day).days == 2:
                 return [], [], []
             return await original_fetch(day)
 
@@ -939,13 +938,13 @@ class TestAsyncReimportStatistics:
 
     async def test_failed_day_does_not_abort_remaining_days(self, coordinator):
         """An exception on one day must not stop the remaining days."""
-        start = date.today() - timedelta(days=3)
+        start = dt_util.now().date() - timedelta(days=3)
         fetch_count = [0]
         original_fetch = coordinator._fetch_day
 
         async def patched_fetch(day):
             fetch_count[0] += 1
-            if (date.today() - day).days == 2:
+            if (dt_util.now().date() - day).days == 2:
                 raise RuntimeError("API blip")
             return await original_fetch(day)
 
@@ -960,7 +959,7 @@ class TestAsyncReimportStatistics:
         self, coordinator
     ):
         """async_set_updated_data must always be called at the end, even after failures."""
-        start = date.today() - timedelta(days=2)
+        start = dt_util.now().date() - timedelta(days=2)
         coordinator._client.get_hourly_energy.side_effect = RuntimeError("down")
 
         with patch(_STATS_PATH, return_value={}):
@@ -982,8 +981,8 @@ class TestFetchDay:
         self, coordinator, fake_electricity, fake_gas
     ):
         """Normal case: both energy types return data."""
-        electricity, gas, costs = await coordinator._fetch_day(
-            date.today() - timedelta(days=1)
+        electricity, gas, _costs = await coordinator._fetch_day(
+            dt_util.now().date() - timedelta(days=1)
         )
         assert electricity == fake_electricity
         assert gas == fake_gas
@@ -1000,8 +999,8 @@ class TestFetchDay:
 
         coordinator._client.get_hourly_energy.side_effect = side_effect
 
-        electricity, gas, costs = await coordinator._fetch_day(
-            date.today() - timedelta(days=1)
+        electricity, gas, _costs = await coordinator._fetch_day(
+            dt_util.now().date() - timedelta(days=1)
         )
         assert electricity == []
         assert gas == fake_gas
@@ -1018,8 +1017,8 @@ class TestFetchDay:
 
         coordinator._client.get_hourly_energy.side_effect = side_effect
 
-        electricity, gas, costs = await coordinator._fetch_day(
-            date.today() - timedelta(days=1)
+        electricity, gas, _costs = await coordinator._fetch_day(
+            dt_util.now().date() - timedelta(days=1)
         )
         assert electricity == fake_electricity
         assert gas == []
@@ -1029,7 +1028,7 @@ class TestFetchDay:
         coordinator._client.get_hourly_energy.side_effect = RuntimeError("API down")
 
         with pytest.raises(RuntimeError, match="API down"):
-            await coordinator._fetch_day(date.today() - timedelta(days=1))
+            await coordinator._fetch_day(dt_util.now().date() - timedelta(days=1))
 
     async def test_gas_failure_does_not_suppress_electricity_success(
         self, coordinator, fake_electricity
@@ -1045,8 +1044,8 @@ class TestFetchDay:
 
         coordinator._client.get_hourly_energy.side_effect = side_effect
 
-        electricity, gas, costs = await coordinator._fetch_day(
-            date.today() - timedelta(days=1)
+        electricity, gas, _costs = await coordinator._fetch_day(
+            dt_util.now().date() - timedelta(days=1)
         )
         assert electricity == fake_electricity
         assert gas == []

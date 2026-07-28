@@ -11,14 +11,12 @@ Focus: make the API client resilient to Coolblue's frequent changes:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
 
 from custom_components.coolblue_energy.api_client import ApiClient, _parse_rsc_response
-
 
 # ── RSC Parsing Robustness ────────────────────────────────────────────────────
 
@@ -106,12 +104,14 @@ class TestRetryOnTransientFailure:
                 request_info=MagicMock(), history=(), status=502
             )
 
-        with patch.object(client, '_next_action_post', side_effect=always_fail):
-            with pytest.raises(aiohttp.ClientResponseError):
-                await client._retry_with_backoff(
-                    fn_name="getInsights",
-                    operation=lambda: client._next_action_post("a", []),
-                )
+        with (
+            patch.object(client, '_next_action_post', side_effect=always_fail),
+            pytest.raises(aiohttp.ClientResponseError),
+        ):
+            await client._retry_with_backoff(
+                fn_name="getInsights",
+                operation=lambda: client._next_action_post("a", []),
+            )
 
         # default 3 attempts (1 initial + 2 retries)
         assert call_count[0] == 3
@@ -128,12 +128,14 @@ class TestRetryOnTransientFailure:
                 request_info=MagicMock(), history=(), status=403
             )
 
-        with patch.object(client, '_next_action_post', side_effect=always_403):
-            with pytest.raises(aiohttp.ClientResponseError):
-                await client._retry_with_backoff(
-                    fn_name="getInsights",
-                    operation=lambda: client._next_action_post("a", []),
-                )
+        with (
+            patch.object(client, '_next_action_post', side_effect=always_403),
+            pytest.raises(aiohttp.ClientResponseError),
+        ):
+            await client._retry_with_backoff(
+                fn_name="getInsights",
+                operation=lambda: client._next_action_post("a", []),
+            )
 
         assert call_count[0] == 1  # no retry for 4xx
 
@@ -146,7 +148,7 @@ class TestRetryOnTransientFailure:
         def timeout_then_work(*_args, **_kwargs):
             call_count[0] += 1
             if call_count[0] < 2:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             return '{"recovered":true}'
 
         with patch.object(

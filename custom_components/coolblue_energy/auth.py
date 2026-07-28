@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from typing import Self
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -257,7 +258,7 @@ class AuthService:
             await self._session.close()
             self._session = None
 
-    async def __aenter__(self) -> AuthService:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_: object) -> None:

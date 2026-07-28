@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from datetime import date, timedelta
-from typing import Awaitable, cast
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -64,7 +65,6 @@ class TestProcessDayRange:
             if day == date(2026, 3, 26):
                 raise RuntimeError("HTTP 500")
             processed.append(day)
-            return None
 
         mixin.process_day = AsyncMock(side_effect=_process)
         await mixin._async_process_day_range(
@@ -182,7 +182,6 @@ class TestBackfill:
             if day == fail_day:
                 raise RuntimeError("HTTP 500")
             processed.append(day)
-            return None
 
         mixin.process_day = AsyncMock(side_effect=_process)
         with _patch_today():
@@ -228,9 +227,8 @@ class TestRetryRecentDays:
         """If every retry day fails, the last exception must propagate."""
         mixin = _FakeMixin(retry_days=2)
         mixin.process_day = AsyncMock(side_effect=RuntimeError("HTTP 500"))
-        with _patch_today():
-            with pytest.raises(RuntimeError, match="HTTP 500"):
-                await mixin._async_retry_recent_days(2)
+        with _patch_today(), pytest.raises(RuntimeError, match="HTTP 500"):
+            await mixin._async_retry_recent_days(2)
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +361,6 @@ class TestReimportStatistics:
             if day == fail_day:
                 raise RuntimeError("HTTP 500")
             processed.append(day)
-            return None
 
         mixin.process_day = AsyncMock(side_effect=_process)
         with _patch_today():
