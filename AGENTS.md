@@ -107,3 +107,20 @@ the committed value doesn't match, so a bump that misses one file breaks publish
 
 `scratch.py` is gitignored throwaway scratch space — don't treat it as source, don't lint or
 fix it. `.venv/`, `.ruff_cache/`, `.pytest_cache/`, `__pycache__/` are all ignored.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `barisdemirdelen/homeassistant-coolblue-energy`, via the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` + `docs/adr/` at the repo root (neither exists yet; skills
+create them lazily). See `docs/agents/domain.md`.
