@@ -86,6 +86,7 @@ Test at the existing seams, one file per seam:
 | `coordinator` (fetch → statistics)    | `tests/test_coordinator.py`  |
 | `config_flow` (setup UI)              | `tests/test_config_flow.py`  |
 | config entry lifecycle                | `tests/test_config_entry.py` |
+| integration metadata                  | `tests/test_metadata.py`     |
 
 Assert on observable behavior at those boundaries, not on private helpers or internal call
 order. Fixtures and entry factories live in `tests/conftest.py` (`make_electricity_entry`,
@@ -130,6 +131,17 @@ value: `version` in `pyproject.toml` and `version` in
 `custom_components/coolblue_energy/manifest.json`. The release workflow re-stamps
 `manifest.json` from the GitHub release tag and **fails the release** if
 the committed value doesn't match, so a bump that misses one file breaks publishing.
+`tests/test_metadata.py` fails when the two drift.
+
+## Quality scale
+
+`custom_components/coolblue_energy/quality_scale.yaml` is a **self-assessment** at the Home
+Assistant Bronze tier: all 20 Bronze rules, each `done` or `exempt` with a reason. hassfest
+grades core integrations only and skips this file, so `tests/test_metadata.py` is what keeps
+it in step — it checks the rule set is complete, that nothing is left outstanding, that every
+exemption gives a reason, that the three entity rules share one wording (ADR 0001), and that
+the polling justification still names the interval `SCAN_INTERVAL` actually uses. A rule that
+cannot honestly be marked done stays visible; an overstating file is worse than none.
 
 ## Housekeeping
 
