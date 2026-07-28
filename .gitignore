@@ -13,3 +13,4 @@ extract
 scratch.py
 .scratch
 .coverage
+.env
