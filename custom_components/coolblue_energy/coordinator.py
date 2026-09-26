@@ -7,7 +7,7 @@ Fetches yesterday's hourly electricity, gas, and costs data and injects them
 as long-term external statistics into the HA recorder so the Energy Dashboard
 can display them.
 
-Three separate ``getInsights`` calls are made per day because the API only
+Three separate ``/api/insights`` calls are made per day because the API only
 populates meaningful values in the field that matches the requested
 ``energy_type``:
 

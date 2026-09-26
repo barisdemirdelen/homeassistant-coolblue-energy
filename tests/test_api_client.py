@@ -1,23 +1,29 @@
 """
 test_api_client.py
 
-Tests for robustness features in ApiClient and _parse_rsc_response.
+Tests for robustness features in ApiClient.
 
 Focus: make the API client resilient to Coolblue's frequent changes:
-  1. RSC response format may change (line prefix versioning)
-  2. Action IDs need retry on transient failures
+  1. Hourly insights requests match the portal's contract
+  2. Transient portal failures are retried, permanent ones are not
   3. Energy ID extraction needs fallback strategies
 """
 
 from __future__ import annotations
 
+import json
+from datetime import date
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
 
-from custom_components.coolblue_energy.api_client import ApiClient, _parse_rsc_response
+from custom_components.coolblue_energy.api_client import ApiClient
 from custom_components.coolblue_energy.auth import CoolblueAuthError
+from custom_components.coolblue_energy.model import GetMeterReadingsRequest
+
+from .conftest import DEBTOR_ID, LOCATION_ID
 
 # ── HTTP response doubles ─────────────────────────────────────────────────────
 
@@ -56,145 +62,180 @@ def _login_session(*, gets: list, posts: list) -> MagicMock:
     return session
 
 
-# ── RSC Parsing Robustness ────────────────────────────────────────────────────
+def _data_session(*responses: MagicMock | Exception) -> MagicMock:
+    """A stand-in logged-in ClientSession whose GETs replay *responses* in order."""
+    session = MagicMock(closed=False)
+    session.get = MagicMock(side_effect=list(responses))
+    return session
 
 
-class TestParseRscResponse:
-    """_parse_rsc_response must tolerate version changes in line prefix."""
+def _client_on(session: MagicMock) -> ApiClient:
+    """An ApiClient that is already logged in on *session*."""
+    client = ApiClient("test@test.com", "pass")
+    client._get_session = AsyncMock(return_value=session)
+    return client
 
-    def test_parses_standard_two_line_format(self):
-        """Standard format: '0:metadata\n1:payload'"""
-        text = '0:{"a":"$@1"}\n1:[{"id":1}]'
-        result = _parse_rsc_response(text)
-        assert result == [{"id": 1}]
 
-    def test_parses_payload_without_line_prefix(self):
-        """Some Next.js versions omit line prefixes entirely."""
-        text = '{"a":"$@1"}\n[{"id":2}]'
-        result = _parse_rsc_response(text)
-        assert result == [{"id": 2}]
+# One hour as the portal's /api/insights returns it (trimmed live response).
+_INSIGHTS_BODY = json.dumps(
+    [
+        {
+            "timestamp": "2026-09-24T00:00:00.000Z",
+            "electricity": {
+                "usage": {"peak": 0, "offPeak": 0.47, "single": 0.47, "total": 0.47},
+                "cost": {"amount": 0.15},
+            },
+            "gas": {"usage": 0, "cost": {"amount": 0}},
+            "dynamicPrice": 0.34,
+            "smartDevices": None,
+        }
+    ]
+)
 
-    def test_parses_numeric_line_prefix(self):
-        """Prefix may be 'N:' where N changes (e.g. Next.js bump)."""
-        text = '0:{"a":"$@1"}\n5:[{"id":3}]'
-        result = _parse_rsc_response(text)
-        assert result == [{"id": 3}]
 
-    def test_handles_blank_lines_between_payloads(self):
-        """Blank lines in response should not break parsing."""
-        text = '0:{}\n\n[{"id":4}]\n'
-        result = _parse_rsc_response(text)
-        assert result == [{"id": 4}]
+def _mislabelled_day(day: date, rows: int) -> str:
+    """A day of rows as /api/insights (v1) sends them: one per wall-clock hour,
+    in order, but labelled ``max(i - 1, 0)`` (observed live, 2026-09)."""
+    return json.dumps(
+        [
+            {"timestamp": f"{day}T{max(i - 1, 0):02d}:00:00.000Z", "dynamicPrice": i}
+            for i in range(rows)
+        ]
+    )
 
-    def test_handles_object_payload_not_just_list(self):
-        """Payload may be a dict, not just a list."""
-        text = '0:{}\n1:{"data":{"value":42}}'
-        result = _parse_rsc_response(text)
-        assert result == {"data": {"value": 42}}
 
-    def test_raises_on_no_valid_json(self):
-        """Pure garbage must still raise."""
-        text = "garbage\nmore garbage"
-        with pytest.raises(ValueError, match="Could not find payload"):
-            _parse_rsc_response(text)
+def _insights_request(
+    energy_type: Literal["electricity", "gas", "costs"] = "electricity",
+    for_date: date = date(2026, 9, 24),
+) -> GetMeterReadingsRequest:
+    return GetMeterReadingsRequest(
+        customer_id=DEBTOR_ID,
+        connection_uuid=LOCATION_ID,
+        energy_type=energy_type,
+        for_date=for_date,
+    )
+
+
+# ── Hourly Insights ───────────────────────────────────────────────────────────
+
+
+class TestHourlyEnergy:
+    async def test_requests_hourly_insights_for_the_day_and_parses_entries(self):
+        session = _data_session(_page(_INSIGHTS_BODY))
+        client = _client_on(session)
+
+        entries = await client.get_hourly_energy(_insights_request("gas"))
+
+        (url,), kwargs = session.get.call_args
+        assert url == "https://www.coolblue.nl/api/insights"
+        assert kwargs["params"] == {
+            "granularity": "HOUR",
+            # Midnight Amsterdam (CEST, UTC+2) on the requested day, in UTC.
+            "from": "2026-09-23T22:00:00.000Z",
+            "year": "2026",
+            "month": "9",
+            "day": "24",
+            "locationId": LOCATION_ID,
+            "debtorNumber": DEBTOR_ID,
+            "commodity": "gas",
+            "hasInsightV2": "false",
+        }
+        assert [(e.name, e.dynamic_price) for e in entries] == [("00:00", 0.34)]
+        assert entries[0].electricity.usage.total == 0.47
+
+    @pytest.mark.parametrize(
+        "day",
+        [
+            date(2026, 9, 24),
+            # Autumn fall-back: the portal folds the doubled 02:00 into one row.
+            date(2025, 10, 26),
+        ],
+    )
+    async def test_rows_are_labelled_by_position_not_by_the_api_timestamp(
+        self, day: date
+    ):
+        session = _data_session(_page(_mislabelled_day(day, 24)))
+
+        entries = await _client_on(session).get_hourly_energy(
+            _insights_request(for_date=day)
+        )
+
+        assert [(e.name, e.dynamic_price) for e in entries] == [
+            (f"{h:02d}:00", h) for h in range(24)
+        ]
+
+    async def test_spring_forward_day_skips_the_missing_hour(self):
+        """2026-03-29 has 23 rows: 02:00 does not exist in Amsterdam."""
+        day = date(2026, 3, 29)
+        session = _data_session(_page(_mislabelled_day(day, 23)))
+
+        entries = await _client_on(session).get_hourly_energy(
+            _insights_request(for_date=day)
+        )
+
+        assert [e.name for e in entries] == [
+            "00:00", "01:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00",
+            "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00",
+            "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
+        ]  # fmt: skip
+
+    async def test_more_rows_than_hours_in_the_day_is_a_value_error(self):
+        """25 rows cannot be placed on a day with 24 wall-clock hours."""
+        day = date(2025, 10, 26)
+        session = _data_session(_page(_mislabelled_day(day, 25)))
+
+        with pytest.raises(ValueError, match="at most 24"):
+            await _client_on(session).get_hourly_energy(_insights_request(for_date=day))
 
 
 # ── Retry Logic ───────────────────────────────────────────────────────────────
 
 
 class TestRetryOnTransientFailure:
-    @pytest.mark.asyncio
-    async def test_retries_on_server_error_then_succeeds(self):
-        """502/503 should trigger retries; eventual success returns result."""
-        client = ApiClient("test@test.com", "pass")
-        call_count = [0]
+    async def test_retries_server_errors_then_returns_data(self):
+        session = _data_session(
+            _page(status=502), _page(status=503), _page(_INSIGHTS_BODY)
+        )
 
-        def side_effect(*_args, **_kwargs):
-            call_count[0] += 1
-            if call_count[0] < 3:
-                raise aiohttp.ClientResponseError(
-                    request_info=MagicMock(),
-                    history=(),
-                    status=(502 if call_count[0] == 1 else 503),
-                )
-            return '{"result":"ok"}'
+        entries = await _client_on(session).get_hourly_energy(_insights_request())
 
-        with patch.object(client, "_next_action_post", side_effect=side_effect):
-            result = await client._retry_with_backoff(
-                fn_name="getInsights",
-                operation=lambda: client._next_action_post("action", []),
-            )
+        assert session.get.call_count == 3
+        assert [e.name for e in entries] == ["00:00"]
 
-        assert call_count[0] == 3
-        assert "ok" in result
-
-    @pytest.mark.asyncio
     async def test_exhausted_retries_raise_last_error(self):
-        """When all retries fail, the final exception is raised."""
-        client = ApiClient("test@test.com", "pass")
-        call_count = [0]
+        session = _data_session(_page(status=502), _page(status=502), _page(status=504))
 
-        def always_fail(*_args, **_kwargs):
-            call_count[0] += 1
-            raise aiohttp.ClientResponseError(
-                request_info=MagicMock(), history=(), status=502
-            )
-
-        with (
-            patch.object(client, "_next_action_post", side_effect=always_fail),
-            pytest.raises(aiohttp.ClientResponseError),
-        ):
-            await client._retry_with_backoff(
-                fn_name="getInsights",
-                operation=lambda: client._next_action_post("a", []),
-            )
+        with pytest.raises(aiohttp.ClientResponseError) as caught:
+            await _client_on(session).get_hourly_energy(_insights_request())
 
         # default 3 attempts (1 initial + 2 retries)
-        assert call_count[0] == 3
+        assert session.get.call_count == 3
+        assert caught.value.status == 504
 
-    @pytest.mark.asyncio
     async def test_no_retry_on_client_error(self):
-        """4xx errors should NOT be retried — they're permanent."""
-        client = ApiClient("test@test.com", "pass")
-        call_count = [0]
+        session = _data_session(_page(status=403), _page(_INSIGHTS_BODY))
 
-        def always_403(*_args, **_kwargs):
-            call_count[0] += 1
-            raise aiohttp.ClientResponseError(
-                request_info=MagicMock(), history=(), status=403
-            )
+        with pytest.raises(aiohttp.ClientResponseError):
+            await _client_on(session).get_hourly_energy(_insights_request())
 
-        with (
-            patch.object(client, "_next_action_post", side_effect=always_403),
-            pytest.raises(aiohttp.ClientResponseError),
-        ):
-            await client._retry_with_backoff(
-                fn_name="getInsights",
-                operation=lambda: client._next_action_post("a", []),
-            )
+        assert session.get.call_count == 1
 
-        assert call_count[0] == 1  # no retry for 4xx
-
-    @pytest.mark.asyncio
     async def test_retries_on_timeout(self):
-        """asyncio.TimeoutError triggers retries like server errors."""
-        client = ApiClient("test@test.com", "pass")
-        call_count = [0]
+        session = _data_session(TimeoutError(), _page(_INSIGHTS_BODY))
 
-        def timeout_then_work(*_args, **_kwargs):
-            call_count[0] += 1
-            if call_count[0] < 2:
-                raise TimeoutError()
-            return '{"recovered":true}'
+        entries = await _client_on(session).get_hourly_energy(_insights_request())
 
-        with patch.object(client, "_next_action_post", side_effect=timeout_then_work):
-            result = await client._retry_with_backoff(
-                fn_name="getInsights",
-                operation=lambda: client._next_action_post("a", []),
-            )
+        assert session.get.call_count == 2
+        assert [e.name for e in entries] == ["00:00"]
 
-        assert call_count[0] == 2
-        assert "recovered" in result
+    async def test_non_json_response_is_a_value_error_without_retry(self):
+        """An HTML page instead of JSON (e.g. a login redirect) fails fast."""
+        session = _data_session(_page("<html>login</html>"), _page(_INSIGHTS_BODY))
+
+        with pytest.raises(ValueError):
+            await _client_on(session).get_hourly_energy(_insights_request())
+
+        assert session.get.call_count == 1
 
 
 # ── Energy ID Extraction Fallbacks ───────────────────────────────────────────

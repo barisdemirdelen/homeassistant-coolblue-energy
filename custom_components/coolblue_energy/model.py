@@ -3,10 +3,10 @@ model.py
 
 Pydantic models for the Coolblue Energy API.
 
-getInsights
------------
-Request  → GetMeterReadingsRequest
-Response → list[MeterReadingEntry]
+``/api/insights``
+-----------------
+Request  → GetMeterReadingsRequest (query string)
+Response → list[MeterReadingEntry] (JSON)
 
 The API returns three distinct response shapes depending on ``energy_type``:
 
@@ -17,9 +17,10 @@ The API returns three distinct response shapes depending on ``energy_type``:
 * ``"costs"``       — usage = 0 for both; cost fields are populated.
 
 Callers therefore make three separate requests and keep the results in separate
-lists.  The response timestamps are Amsterdam local time formatted with a
-misleading ``Z`` suffix; :attr:`MeterReadingEntry.name` extracts the hour
-verbatim to produce an Amsterdam-local ``"HH:00"`` label used by the
+lists.  Entry timestamps are Amsterdam local time formatted with a misleading
+``Z`` suffix, assigned by ``ApiClient.get_hourly_energy`` from row position
+(the API's own labels are off by one); :attr:`MeterReadingEntry.name` extracts
+the hour verbatim to produce an Amsterdam-local ``"HH:00"`` label used by the
 statistics helpers.
 """
 
@@ -46,9 +47,9 @@ class CamelCaseModel(BaseModel):
 
 class GetMeterReadingsRequest(CamelCaseModel):
     """
-    Parameters for the ``getInsights`` Next.js server action.
+    Parameters for the portal's ``GET /api/insights`` endpoint.
 
-    Call :meth:`to_payload` to get the ordered list expected by the API.
+    Call :meth:`to_query_params` to get the query string the API expects.
     """
 
     customer_id: str
@@ -63,33 +64,47 @@ class GetMeterReadingsRequest(CamelCaseModel):
     for_date: date = Field(default_factory=date.today)
     """Date to fetch hourly data for."""
 
-    cumulative: bool = False
-    """Pass ``False`` for hourly interval data."""
-
-    def to_payload(self) -> list:
-        """Return the JSON-serialisable positional-argument list for the API."""
-        # Next.js serialises Date objects as "$D" + ISO-8601 UTC string.
-        # The API expects the start of the requested day in Amsterdam time,
-        # expressed as UTC.
+    def to_query_params(self) -> dict[str, str]:
+        """Return the ``/api/insights`` query parameters for hourly data."""
+        # The portal requests the start of the day in Amsterdam time,
+        # expressed as a UTC ISO-8601 string (JavaScript ``toISOString``).
         day_start_utc = datetime(
             self.for_date.year,
             self.for_date.month,
             self.for_date.day,
-            0,
-            0,
             tzinfo=_TZ_NL,
         ).astimezone(UTC)
-        next_date = f"$D{day_start_utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')}"
+        return {
+            "granularity": "HOUR",
+            "from": day_start_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "year": str(self.for_date.year),
+            "month": str(self.for_date.month),
+            "day": str(self.for_date.day),
+            "locationId": self.connection_uuid,
+            "debtorNumber": self.customer_id,
+            "commodity": self.energy_type,
+            "hasInsightV2": "false",
+        }
+
+    def hour_timestamps(self) -> list[str]:
+        """
+        One :attr:`MeterReadingEntry.timestamp` value per wall-clock hour that
+        exists on :attr:`for_date` in Amsterdam, in order.
+
+        That is 23 hours on the spring-forward day (02:00 is skipped) and 24
+        on every other day, matching the rows the portal returns: it folds the
+        repeated autumn 02:00 hour into a single row.
+        """
+        d = self.for_date
         return [
-            self.customer_id,
-            self.connection_uuid,
-            self.energy_type,
-            False,
-            next_date,
-            self.for_date.year,
-            self.for_date.month,
-            self.for_date.day,
-            self.cumulative,
+            f"{d.isoformat()}T{hour:02d}:00:00.000Z"
+            for hour in range(24)
+            # A nonexistent local time round-trips to a different hour.
+            if datetime(d.year, d.month, d.day, hour, tzinfo=_TZ_NL)
+            .astimezone(UTC)
+            .astimezone(_TZ_NL)
+            .hour
+            == hour
         ]
 
 
@@ -178,8 +193,9 @@ class SmartDevicesData(BaseModel):
 
 class MeterReadingEntry(CamelCaseModel):
     """
-    One hourly entry returned by ``getInsights``, parsed directly from the
-    API JSON without any field transformation.
+    One hourly entry returned by ``/api/insights``. Fields are parsed from the
+    API JSON as-is, except :attr:`timestamp`, which ``ApiClient`` re-derives
+    from row position because the API's own labels are off by one.
 
     All three response shapes (electricity, gas, costs) map onto this same
     model; fields not relevant to the requested ``energy_type`` will be
@@ -220,7 +236,7 @@ class MeterReadingEntry(CamelCaseModel):
     def name(self) -> str:
         """Amsterdam-local hour label derived from :attr:`timestamp`, e.g. ``"14:00"``.
 
-        The API returns timestamps in Amsterdam local time with a misleading
-        ``Z`` suffix, so the hour is extracted verbatim from the string.
+        :attr:`timestamp` holds Amsterdam local time with a misleading ``Z``
+        suffix, so the hour is extracted verbatim from the string.
         """
         return f"{self.timestamp[11:13]}:00"

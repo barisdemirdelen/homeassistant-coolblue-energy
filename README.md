@@ -226,7 +226,7 @@ See [AGENTS.md](AGENTS.md) for the full toolchain and conventions.
 
 - Data is only available for the **previous day**; real-time readings are not possible
 - Requires a Coolblue Energy **contract** (electricity and/or gas)
-- The integration scrapes the Coolblue portal's Next.js server actions; changes to
+- The integration uses the Coolblue portal's undocumented internal API; changes to
   the portal may break it until an update is released
 
 ---
