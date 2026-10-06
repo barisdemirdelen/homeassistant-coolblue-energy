@@ -13,8 +13,7 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/barisdemirdelen/homeassistant-coolblue-energy/issues",
   "requirements": [
-    "beautifulsoup4>=4.0.0,<5.0.0",
-    "yarl>=1.0.0,<2.0.0"
+    "beautifulsoup4>=4.0.0,<5.0.0"
   ],
   "version": "2.0.1"
 }
